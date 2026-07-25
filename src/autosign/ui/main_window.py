@@ -1,0 +1,226 @@
+"""Main window: a RibbonBar (Home/Settings tabs) drives a Home workspace
+(PDF viewer + sign controls) and a Settings page, with the Template Designer
+opening as a full-window overlay when creating/editing a template.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QApplication,
+    QInputDialog,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..config import settings_file, templates_dir
+from ..services import PdfInspectService, SettingsService, TemplateService
+from ..signing import CertificateLoadError, Pkcs12CertificateProvider
+from . import theme
+from .settings_screen import SettingsScreen
+from .sign_screen import SignScreen, ViewerStatus
+from .template_designer import TemplateDesignerScreen
+from .widgets import RibbonBar
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, initial_theme: str = theme.THEME_LIGHT):
+        super().__init__()
+        self.setWindowTitle("Autosign - Batch PDF Signing")
+        self.resize(1400, 860)
+        self._startup_prompt_shown = False
+        self._shortcuts: list[QShortcut] = []
+
+        self._template_service = TemplateService(templates_dir())
+        self._pdf_inspect = PdfInspectService()
+        self._settings_service = SettingsService(settings_file())
+
+        self._outer_stack = QStackedWidget()
+        self.setCentralWidget(self._outer_stack)
+
+        self._sign_screen = SignScreen(
+            self._template_service, self._pdf_inspect, self._settings_service
+        )
+        self._sign_screen.set_canvas_backdrop_color(
+            QColor(theme.palette_for(initial_theme).canvas_backdrop)
+        )
+        self._settings_screen = SettingsScreen(self._template_service, self._settings_service)
+        self._settings_screen.create_template_requested.connect(self._open_new_template)
+        self._settings_screen.edit_template_requested.connect(self._open_edit_template)
+        self._settings_screen.settings_saved.connect(self._sign_screen.refresh_cert_status)
+        self._settings_screen.settings_saved.connect(self._apply_shortcuts)
+        self._settings_screen.theme_changed.connect(self._apply_theme)
+
+        self._content_stack = QStackedWidget()
+        self._content_stack.addWidget(self._sign_screen)
+        self._content_stack.addWidget(self._settings_screen)
+
+        self._ribbon = RibbonBar(theme_mode=initial_theme)
+        self._wire_ribbon()
+
+        main_page = QWidget()
+        layout = QVBoxLayout(main_page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._ribbon)
+        layout.addWidget(self._content_stack, 1)
+        self._outer_stack.addWidget(main_page)
+
+        self._transient_screen: TemplateDesignerScreen | None = None
+        self._apply_shortcuts()
+
+    def _wire_ribbon(self) -> None:
+        r = self._ribbon
+        r.home_activated.connect(lambda: self._content_stack.setCurrentIndex(0))
+        r.settings_activated.connect(lambda: self._content_stack.setCurrentIndex(1))
+        r.open_files_requested.connect(self._sign_screen.open_files)
+        r.open_folder_requested.connect(self._sign_screen.open_folder)
+        r.prev_page_requested.connect(self._sign_screen.prev_page)
+        r.next_page_requested.connect(self._sign_screen.next_page)
+        r.zoom_in_requested.connect(self._sign_screen.zoom_in)
+        r.zoom_out_requested.connect(self._sign_screen.zoom_out)
+        r.fit_width_requested.connect(self._sign_screen.fit_width)
+        r.fit_page_requested.connect(self._sign_screen.fit_page)
+        r.reset_zoom_requested.connect(self._sign_screen.reset_zoom)
+        r.toggle_panel_requested.connect(self._sign_screen.toggle_panel)
+        r.sign_requested.connect(self._sign_screen.start_signing)
+        r.export_report_requested.connect(self._sign_screen.export_report)
+
+        self._sign_screen.settings_requested.connect(lambda: r.setCurrentIndex(1))
+        self._sign_screen.viewer_status_changed.connect(self._on_viewer_status)
+        self._sign_screen.panel_toggled.connect(r.set_panel_toggle_text)
+        self._sign_screen.sign_running_changed.connect(lambda running: r.set_sign_enabled(not running))
+
+    # ------------------------------------------------------------------ theme
+    def _apply_theme(self, mode: str) -> None:
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.setStyleSheet(theme.stylesheet(mode))
+        self._ribbon.set_theme(mode)
+        self._sign_screen.set_canvas_backdrop_color(QColor(theme.palette_for(mode).canvas_backdrop))
+
+    # -------------------------------------------------------------- shortcuts
+    def _apply_shortcuts(self) -> None:
+        """(Re)bind the user-configurable Open Files / Open Folder / Sign
+        shortcuts - called once at startup and again whenever Settings is
+        saved, since the user may have just changed one."""
+        for shortcut in self._shortcuts:
+            shortcut.setParent(None)
+        self._shortcuts.clear()
+
+        settings = self._settings_service.load()
+        bindings = (
+            (settings.shortcut_open_files, self._sign_screen.open_files),
+            (settings.shortcut_open_folder, self._sign_screen.open_folder),
+            (settings.shortcut_sign, self._sign_screen.start_signing),
+        )
+        for sequence_text, handler in bindings:
+            if not sequence_text:
+                continue
+            sequence = QKeySequence(sequence_text)
+            if sequence.isEmpty():
+                continue
+            shortcut = QShortcut(sequence, self)
+            shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            shortcut.activated.connect(handler)
+            self._shortcuts.append(shortcut)
+
+    # --------------------------------------------------------- startup prompt
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().showEvent(event)
+        if not self._startup_prompt_shown:
+            self._startup_prompt_shown = True
+            # Deferred to the next event-loop iteration rather than called
+            # directly here: opening a modal dialog synchronously from
+            # inside showEvent() nests it into the same call stack as
+            # showMaximized()'s own window-manager activity, which can wedge
+            # the window on Windows instead of showing the prompt.
+            QTimer.singleShot(0, self.prompt_startup_password_if_needed)
+
+    def prompt_startup_password_if_needed(self) -> None:
+        """Called once, right when the window first becomes visible: if a
+        certificate is already configured, ask for its password so signing
+        doesn't interrupt the user later for it. Pre-filled with the
+        remembered password (if any) so accepting it is just Enter; wrong
+        password just leaves the session unprimed (the normal Sign-time
+        prompt still covers it) rather than blocking the app."""
+        settings = self._settings_service.load()
+        if not settings.last_pfx_path:
+            return
+
+        pfx_name = Path(settings.last_pfx_path).name
+        remembered = self._settings_service.get_remembered_password(settings) or ""
+        password, ok = QInputDialog.getText(
+            self,
+            "Certificate password",
+            f"Enter the password for {pfx_name} to sign with this session:",
+            QLineEdit.EchoMode.Password,
+            remembered,
+        )
+        if not ok or not password:
+            return
+        try:
+            Pkcs12CertificateProvider(Path(settings.last_pfx_path), password)
+        except CertificateLoadError as exc:
+            QMessageBox.warning(self, "Certificate error", str(exc))
+            return
+        self._sign_screen.set_session_password(password)
+
+    def _on_viewer_status(self, status: ViewerStatus) -> None:
+        self._ribbon.set_page_label(status.page_label)
+        self._ribbon.set_nav_enabled(status.has_prev, status.has_next)
+        self._ribbon.set_page_signed(status.signed)
+        self._ribbon.set_zoom_label(status.zoom_label)
+
+    def _open_new_template(self) -> None:
+        screen = TemplateDesignerScreen(self._template_service, self._pdf_inspect)
+        screen.back_requested.connect(self._back_to_main)
+        screen.saved.connect(self._back_to_main)
+        self._show_transient(screen)
+
+    def _open_edit_template(self, template_id: str) -> None:
+        template = self._template_service.load(template_id)
+        screen = TemplateDesignerScreen(
+            self._template_service, self._pdf_inspect, existing_template=template
+        )
+        screen.back_requested.connect(self._back_to_main)
+        screen.saved.connect(self._back_to_main)
+        self._show_transient(screen)
+
+    def _show_transient(self, screen: TemplateDesignerScreen) -> None:
+        self._clear_transient()
+        self._transient_screen = screen
+        self._outer_stack.addWidget(screen)
+        self._outer_stack.setCurrentWidget(screen)
+
+    def _back_to_main(self) -> None:
+        self._settings_screen.refresh_templates()
+        self._sign_screen.reload_templates()
+        self._outer_stack.setCurrentIndex(0)
+        self._ribbon.setCurrentIndex(1)  # templates are managed from Settings
+        self._clear_transient()
+
+    def _clear_transient(self) -> None:
+        if self._transient_screen is not None:
+            self._outer_stack.removeWidget(self._transient_screen)
+            self._transient_screen.deleteLater()
+            self._transient_screen = None
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # Block closing the app mid-batch - avoid cutting off file writes
+        # (and avoid destroying a QThread while it's still running).
+        if self._sign_screen.is_batch_running():
+            QMessageBox.warning(
+                self,
+                "Signing in progress",
+                "Please wait for the batch to finish, or click Cancel, before closing the app.",
+            )
+            event.ignore()
+            return
+        event.accept()

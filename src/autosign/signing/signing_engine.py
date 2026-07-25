@@ -1,0 +1,118 @@
+"""Apply a Template to a specific PDF file and sign it with pyHanko (PAdES, PKCS#12).
+
+Multiple signature boxes in the same file (including an "all pages" box
+spread across several pages) are signed one at a time via incremental
+update, so each later signature doesn't invalidate the ones already applied
+to the same file (see docs/02-yeu-cau-phi-chuc-nang.md section 2).
+
+Appearance: hand-signature image on the left, signer name + sign date on the
+right - matching Acrobat's default layout when signing with a certificate
+(see appearance_compose.py).
+"""
+from __future__ import annotations
+
+import io
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from pyhanko import stamp
+from pyhanko.pdf_utils import images
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.sign import fields, signers
+
+from ..models import Rect, SignatureBox, Template
+from .appearance_compose import build_text_lines, compose_appearance_image
+from .certificate_provider import CertificateProvider
+
+if TYPE_CHECKING:
+    # Type-only import to avoid a circular import at runtime:
+    # services.batch_sign_service imports SigningEngine from this package,
+    # while signing_engine needs PdfInfo from services just to annotate a
+    # parameter type.
+    from ..services.pdf_inspect_service import PdfInfo
+
+
+class SigningError(Exception):
+    """Error signing one specific file (missing page, unreadable signature
+    image...). BatchSignService catches this per file so it doesn't abort
+    the whole batch.
+    """
+
+
+class SigningEngine:
+    def __init__(self, cert_provider: CertificateProvider, signer_display_name: str = ""):
+        self._cert_provider = cert_provider
+        self._signer_display_name = signer_display_name
+
+    def sign_file(self, pdf_info: PdfInfo, template: Template, output_path: Path) -> None:
+        boxes = template.signature_boxes
+        if not boxes:
+            raise SigningError("Template has no signature boxes.")
+
+        self._validate_pages(pdf_info, boxes)
+        sign_time = datetime.now()
+
+        try:
+            pdf_bytes = pdf_info.path.read_bytes()
+            for box_num, box in enumerate(boxes, start=1):
+                for page_index in box.page_ref.resolve_indices(pdf_info.page_count):
+                    field_name = f"Sig{box_num}_p{page_index + 1}"
+                    pdf_bytes = self._apply_one_field(
+                        pdf_bytes, pdf_info, box, page_index, field_name, sign_time
+                    )
+        except SigningError:
+            raise
+        except Exception as exc:  # pyHanko/PIL can raise several different error types
+            raise SigningError(f"Signing error: {exc}") from exc
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(pdf_bytes)
+
+    def _validate_pages(self, pdf_info: PdfInfo, boxes: list[SignatureBox]) -> None:
+        for box in boxes:
+            if not box.page_ref.resolve_indices(pdf_info.page_count):
+                raise SigningError(
+                    f"Missing page: template requires '{box.page_ref.describe()}' "
+                    f"but the file only has {pdf_info.page_count} page(s)."
+                )
+
+    def _apply_one_field(
+        self,
+        pdf_bytes: bytes,
+        pdf_info: PdfInfo,
+        box: SignatureBox,
+        page_index: int,
+        field_name: str,
+        sign_time: datetime,
+    ) -> bytes:
+        actual_size = pdf_info.page_size(page_index)
+        rect = box.rect
+        if actual_size.differs_from(box.page_size_at_design_time):
+            rect = rect.scaled_to(box.page_size_at_design_time, actual_size)
+
+        pdf_box = (rect.x, rect.y, rect.x + rect.width, rect.y + rect.height)
+        field_spec = fields.SigFieldSpec(field_name, box=pdf_box, on_page=page_index)
+
+        pdf_signer = signers.PdfSigner(
+            signers.PdfSignatureMetadata(field_name=field_name),
+            signer=self._cert_provider.get_signer(),
+            stamp_style=self._build_stamp_style(box, rect, sign_time),
+            new_field_spec=field_spec,
+        )
+
+        writer = IncrementalPdfFileWriter(io.BytesIO(pdf_bytes))
+        out_buffer = io.BytesIO()
+        pdf_signer.sign_pdf(writer, output=out_buffer)
+        return out_buffer.getvalue()
+
+    def _build_stamp_style(
+        self, box: SignatureBox, rect: Rect, sign_time: datetime
+    ) -> stamp.BaseStampStyle:
+        text_lines = build_text_lines(box.appearance, self._signer_display_name, sign_time)
+        composed = compose_appearance_image(
+            box.appearance.image_path, text_lines, rect.width, rect.height
+        )
+        return stamp.StaticStampStyle(
+            background=images.PdfImage(composed), border_width=0, background_opacity=1.0
+        )
