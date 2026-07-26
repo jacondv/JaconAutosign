@@ -126,7 +126,7 @@ class FileListPanel(QWidget):
                 signed, total = counts
                 text += f"  [{signed}/{total} Signed]"
                 if signed > 0:
-                    color = Qt.GlobalColor.darkGreen
+                    color = Qt.GlobalColor.darkGreen if signed == total else Qt.GlobalColor.darkYellow
             item = QListWidgetItem(text)
             item.setData(_ROLE_PATH, path)
             item.setToolTip(str(path))
