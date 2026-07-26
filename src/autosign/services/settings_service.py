@@ -45,6 +45,7 @@ class AppSettings:
     last_file_scope_current_only: bool = False
     last_page_scope: str = DEFAULT_PAGE_SCOPE
     last_open_dir: Optional[str] = None
+    wheel_page_turn_enabled: bool = False
 
 
 class SettingsService:

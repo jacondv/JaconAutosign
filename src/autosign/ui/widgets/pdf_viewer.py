@@ -83,6 +83,7 @@ class PdfViewerWidget(QWidget):
         self._page_sizes: list[PageSize] = []
         self._current_page = 0
         self._zoom = 1.0
+        self._wheel_page_turn = False
 
         self._canvas = PageCanvas()
         self._canvas.set_interactive(False)
@@ -196,6 +197,7 @@ class PdfViewerWidget(QWidget):
         self._page_sizes = []
         self._current_page = 0
         self._canvas.set_boxes({})
+        self._canvas.close_text_source()
         self._page_label.setText("No file")
         self._prev_btn.setEnabled(False)
         self._next_btn.setEnabled(False)
@@ -233,6 +235,7 @@ class PdfViewerWidget(QWidget):
             render_path, index, dpi=round(self.dpi()), device_pixel_ratio=self.devicePixelRatioF() or 1.0
         )
         self._canvas.set_page_image(image)
+        self._canvas.set_text_source(render_path, index, self._page_sizes[index], self.dpi())
         self._page_label.setText(f"Page {index + 1}/{len(self._page_sizes)}")
         self._prev_btn.setEnabled(index > 0)
         self._next_btn.setEnabled(index < len(self._page_sizes) - 1)
@@ -304,6 +307,13 @@ class PdfViewerWidget(QWidget):
         self._left_nav.raise_()
         self._right_nav.raise_()
 
+    def set_wheel_page_turn_enabled(self, enabled: bool) -> None:
+        """When enabled, scrolling past the top/bottom edge of the current
+        page (i.e. the scrollbar is already at its limit) moves to the
+        previous/next page instead of doing nothing. Off by default - plain
+        wheel scrolling just scrolls within the current page."""
+        self._wheel_page_turn = enabled
+
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt override)
         if obj is self._scroll.viewport() and event.type() == QEvent.Type.Wheel:
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
@@ -312,4 +322,13 @@ class PdfViewerWidget(QWidget):
                 else:
                     self.zoom_out()
                 return True
+            if self._wheel_page_turn:
+                vbar = self._scroll.verticalScrollBar()
+                delta = event.angleDelta().y()
+                if delta > 0 and vbar.value() <= vbar.minimum():
+                    self.prev_page()
+                    return True
+                if delta < 0 and vbar.value() >= vbar.maximum():
+                    self.next_page()
+                    return True
         return super().eventFilter(obj, event)

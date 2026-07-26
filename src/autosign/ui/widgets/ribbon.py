@@ -56,6 +56,7 @@ class RibbonBar(QWidget):
     toggle_panel_requested = Signal()
     sign_requested = Signal()
     export_report_requested = Signal()
+    wheel_page_turn_toggled = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None, theme_mode: str = theme.THEME_LIGHT):
         super().__init__(parent)
@@ -138,6 +139,15 @@ class RibbonBar(QWidget):
         )
         row.addWidget(self._divider())
         row.addWidget(self._build_navigate_cluster())
+        self._wheel_page_turn_btn = self._toggle_icon_button(
+            "Wheel Turn",
+            "Wheel Page Turn: scrolling past the top/bottom edge of a page "
+            "moves to the previous/next page. Off by default (wheel only "
+            "scrolls within the current page).",
+            icons.wheel_page_turn_icon,
+            self.wheel_page_turn_toggled,
+        )
+        row.addWidget(self._group(self._wheel_page_turn_btn))
         row.addWidget(self._divider())
         row.addWidget(self._build_zoom_cluster())
         row.addWidget(self._divider())
@@ -239,6 +249,13 @@ class RibbonBar(QWidget):
     def set_panel_toggle_text(self, text: str) -> None:
         self._toggle_panel_btn.setText(text.replace(">>", "").replace("<<", "").strip())
 
+    def set_wheel_page_turn_enabled(self, enabled: bool) -> None:
+        """Restore a saved preference - does not emit wheel_page_turn_toggled
+        (mirrors the other set_*() restore methods across the app)."""
+        self._wheel_page_turn_btn.blockSignals(True)
+        self._wheel_page_turn_btn.setChecked(enabled)
+        self._wheel_page_turn_btn.blockSignals(False)
+
     # ----------------------------------------------------------------- helpers
     def _icon_button(
         self, caption: str, icon_factory: IconFactory, signal: Signal, big: bool = False, small: bool = False
@@ -257,6 +274,24 @@ class RibbonBar(QWidget):
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
             btn.setFixedWidth(_SMALL_ICON.width() + 10)
         btn.clicked.connect(signal.emit)
+        self._icon_buttons.append((btn, icon_factory, size))
+        return btn
+
+    def _toggle_icon_button(
+        self, caption: str, tooltip: str, icon_factory: IconFactory, signal: Signal
+    ) -> QToolButton:
+        size = _ICON_SIZE
+        btn = QToolButton()
+        btn.setIcon(icon_factory(size.width(), self._icon_color))
+        btn.setIconSize(size)
+        btn.setAutoRaise(True)
+        btn.setCheckable(True)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setToolTip(tooltip)
+        btn.setText(caption)
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        btn.setFixedWidth(62)
+        btn.toggled.connect(signal.emit)
         self._icon_buttons.append((btn, icon_factory, size))
         return btn
 

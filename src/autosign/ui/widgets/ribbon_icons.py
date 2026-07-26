@@ -198,6 +198,30 @@ def export_icon(size: int = 28, color: str = _DEFAULT_STROKE) -> QIcon:
     return _icon(draw, size, color)
 
 
+def wheel_page_turn_icon(size: int = 28, color: str = _DEFAULT_STROKE) -> QIcon:
+    """A mouse body with a scroll wheel, flanked by up/down chevrons - wheel
+    past the page edge to turn the page."""
+
+    def draw(p: QPainter, s: int, stroke: QColor) -> None:
+        body = QRectF(s * 0.36, s * 0.10, s * 0.28, s * 0.50)
+        p.drawRoundedRect(body, s * 0.12, s * 0.12)
+        p.drawLine(QPointF(s * 0.5, s * 0.18), QPointF(s * 0.5, s * 0.30))
+        p.drawPolyline(
+            QPolygonF([QPointF(s * 0.06, s * 0.20), QPointF(s * 0.14, s * 0.10), QPointF(s * 0.22, s * 0.20)])
+        )
+        p.drawPolyline(
+            QPolygonF([QPointF(s * 0.06, s * 0.72), QPointF(s * 0.14, s * 0.82), QPointF(s * 0.22, s * 0.72)])
+        )
+        p.drawPolyline(
+            QPolygonF([QPointF(s * 0.78, s * 0.20), QPointF(s * 0.86, s * 0.10), QPointF(s * 0.94, s * 0.20)])
+        )
+        p.drawPolyline(
+            QPolygonF([QPointF(s * 0.78, s * 0.72), QPointF(s * 0.86, s * 0.82), QPointF(s * 0.94, s * 0.72)])
+        )
+
+    return _icon(draw, size, color)
+
+
 def panel_icon(size: int = 28, color: str = _DEFAULT_STROKE) -> QIcon:
     def draw(p: QPainter, s: int, stroke: QColor) -> None:
         p.drawRect(QRectF(s * 0.10, s * 0.16, s * 0.80, s * 0.68))

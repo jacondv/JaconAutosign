@@ -269,6 +269,11 @@ QToolButton:hover {{
 QToolButton:pressed {{
     background: {p.bg_pressed};
 }}
+QToolButton:checked {{
+    background: {p.accent};
+    border: 1px solid {p.accent};
+    color: {p.accent_text};
+}}
 QToolButton:disabled {{
     color: {p.text_disabled};
 }}

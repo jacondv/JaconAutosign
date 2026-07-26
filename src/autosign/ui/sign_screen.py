@@ -174,6 +174,9 @@ class SignScreen(QWidget):
     def reset_zoom(self) -> None:
         self._viewer.set_zoom(1.0)
 
+    def set_wheel_page_turn_enabled(self, enabled: bool) -> None:
+        self._viewer.set_wheel_page_turn_enabled(enabled)
+
     def _on_viewer_state_changed(self) -> None:
         self._sync_preview_overlay()
         if not self._current_file:

@@ -74,6 +74,10 @@ class MainWindow(QMainWindow):
         self._clipboard_autoload_done = False
         self._apply_shortcuts()
 
+        initial_settings = self._settings_service.load()
+        self._ribbon.set_wheel_page_turn_enabled(initial_settings.wheel_page_turn_enabled)
+        self._sign_screen.set_wheel_page_turn_enabled(initial_settings.wheel_page_turn_enabled)
+
     def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().showEvent(event)
         if not self._clipboard_autoload_done:
@@ -121,6 +125,7 @@ class MainWindow(QMainWindow):
         r.toggle_panel_requested.connect(self._sign_screen.toggle_panel)
         r.sign_requested.connect(self._sign_screen.start_signing)
         r.export_report_requested.connect(self._sign_screen.export_report)
+        r.wheel_page_turn_toggled.connect(self._on_wheel_page_turn_toggled)
 
         self._sign_screen.settings_requested.connect(lambda: r.setCurrentIndex(1))
         self._sign_screen.viewer_status_changed.connect(self._on_viewer_status)
@@ -134,6 +139,13 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(theme.stylesheet(mode))
         self._ribbon.set_theme(mode)
         self._sign_screen.set_canvas_backdrop_color(QColor(theme.palette_for(mode).canvas_backdrop))
+
+    # -------------------------------------------------------- wheel page turn
+    def _on_wheel_page_turn_toggled(self, enabled: bool) -> None:
+        self._sign_screen.set_wheel_page_turn_enabled(enabled)
+        settings = self._settings_service.load()
+        settings.wheel_page_turn_enabled = enabled
+        self._settings_service.save(settings)
 
     # -------------------------------------------------------------- shortcuts
     def _apply_shortcuts(self) -> None:
