@@ -8,8 +8,8 @@ public methods (prev_page, next_page, zoom_in, ...) for the ribbon to call.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QPointF, Qt, Signal
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from ...models import PageSize
@@ -20,6 +20,55 @@ ZOOM_MIN = 0.25
 ZOOM_MAX = 4.0
 ZOOM_STEP = 1.25
 _VIEWPORT_MARGIN = 20  # px, leaves a little breathing room for Fit Width/Page
+_EDGE_ZONE_WIDTH = 48
+
+
+class _EdgeNavZone(QWidget):
+    """An invisible strip along the left/right edge of the viewer - shows a
+    chevron on hover and emits `clicked` on click, like Foxit/most PDF
+    readers' edge-hover page navigation."""
+
+    clicked = Signal()
+
+    def __init__(self, parent: QWidget, point_left: bool):
+        super().__init__(parent)
+        self._point_left = point_left
+        self._hovered = False
+        self.setFixedWidth(_EDGE_ZONE_WIDTH)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        if not self._hovered:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 60))
+        cx, cy = self.width() / 2, self.height() / 2
+        size = 12
+        pen = QPen(QColor(255, 255, 255, 235), 3)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        if self._point_left:
+            top, mid, bottom = QPointF(cx + size / 2, cy - size), QPointF(cx - size / 2, cy), QPointF(cx + size / 2, cy + size)
+        else:
+            top, mid, bottom = QPointF(cx - size / 2, cy - size), QPointF(cx + size / 2, cy), QPointF(cx - size / 2, cy + size)
+        painter.drawLine(top, mid)
+        painter.drawLine(mid, bottom)
 
 
 class PdfViewerWidget(QWidget):
@@ -45,6 +94,14 @@ class PdfViewerWidget(QWidget):
         self._scroll.setWidgetResizable(False)
         self._scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._scroll.viewport().installEventFilter(self)
+
+        # Overlay children of the QScrollArea itself (not its viewport) sit
+        # on top of the scrolled content, which is the standard way to get
+        # a floating overlay inside a QScrollArea.
+        self._left_nav = _EdgeNavZone(self._scroll, point_left=True)
+        self._left_nav.clicked.connect(self.prev_page)
+        self._right_nav = _EdgeNavZone(self._scroll, point_left=False)
+        self._right_nav.clicked.connect(self.next_page)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -114,18 +171,23 @@ class PdfViewerWidget(QWidget):
         page_sizes: list[PageSize],
         signed_path: str | None = None,
         signed_pages: set[int] | None = None,
+        initial_page: int = 0,
     ) -> None:
         """`signed_path`/`signed_pages`: when a page is already signed, it's
         rendered from the signed output file instead of `pdf_path` so the
         real embedded signature shows, not just a placeholder box. Signing
         never changes page count/order, so page indices line up between the
-        two files."""
+        two files. `initial_page`: e.g. jump back to the page that was just
+        signed, instead of always resetting to the first page."""
         self._pdf_path = pdf_path
         self._signed_path = signed_path
         self._signed_pages = set(signed_pages) if signed_pages else set()
         self._page_sizes = page_sizes
         self._current_page = 0
-        self.show_page(0)
+        self.show_page(max(0, min(initial_page, len(page_sizes) - 1)) if page_sizes else 0)
+        # So arrow-key page navigation works immediately after opening a
+        # file, without the user needing to click into the viewer first.
+        self._canvas.setFocus()
 
     def clear(self) -> None:
         self._pdf_path = None
@@ -228,6 +290,17 @@ class PdfViewerWidget(QWidget):
         vbar = self._scroll.verticalScrollBar()
         hbar.setValue(int(hbar.value() - dx))
         vbar.setValue(int(vbar.value() - dy))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        self._reposition_nav_zones()
+
+    def _reposition_nav_zones(self) -> None:
+        h = self._scroll.height()
+        self._left_nav.setGeometry(0, 0, _EDGE_ZONE_WIDTH, h)
+        self._right_nav.setGeometry(self._scroll.width() - _EDGE_ZONE_WIDTH, 0, _EDGE_ZONE_WIDTH, h)
+        self._left_nav.raise_()
+        self._right_nav.raise_()
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt override)
         if obj is self._scroll.viewport() and event.type() == QEvent.Type.Wheel:

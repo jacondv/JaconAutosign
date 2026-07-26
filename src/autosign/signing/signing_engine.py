@@ -64,12 +64,20 @@ class SigningEngine:
                 f"Missing page: '{page_scope.describe()}' does not resolve to a valid page "
                 f"in this file ({pdf_info.page_count} page(s))."
             )
+
+        # Local import to avoid a circular import (services imports this
+        # module via BatchSignService -> SigningEngine, at package-init
+        # time; this only needs to resolve once signing actually runs).
+        from ..services.signature_status_service import get_signed_pages
+
+        already_signed = get_signed_pages(pdf_info.path)
+        pages_to_sign = [i for i in page_indices if i not in already_signed]
         sign_time = datetime.now()
 
         try:
             pdf_bytes = pdf_info.path.read_bytes()
             for box_num, box in enumerate(boxes, start=1):
-                for page_index in page_indices:
+                for page_index in pages_to_sign:
                     field_name = f"Sig{box_num}_p{page_index + 1}"
                     pdf_bytes = self._apply_one_field(
                         pdf_bytes, pdf_info, box, page_index, field_name, sign_time
@@ -87,7 +95,14 @@ class SigningEngine:
         # behind if interrupted midway.
         tmp_path = output_path.with_name(output_path.name + ".autosign-tmp")
         tmp_path.write_bytes(pdf_bytes)
-        os.replace(tmp_path, output_path)
+        try:
+            os.replace(tmp_path, output_path)
+        except OSError as exc:
+            tmp_path.unlink(missing_ok=True)
+            raise SigningError(
+                f"Could not write {output_path.name} - it may be open in another "
+                f"program (e.g. a PDF viewer). Close it and try signing again. ({exc})"
+            ) from exc
 
     def _apply_one_field(
         self,

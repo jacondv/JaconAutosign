@@ -57,10 +57,10 @@ class SignControlPanel(QWidget):
         self._scope_all_radio = QRadioButton("All files in the list")
         self._scope_all_radio.setChecked(True)
         self._scope_current_radio.toggled.connect(
-            lambda checked: checked and self.file_scope_changed.emit(True)
+            lambda checked: checked and self._on_file_scope_toggled(True)
         )
         self._scope_all_radio.toggled.connect(
-            lambda checked: checked and self.file_scope_changed.emit(False)
+            lambda checked: checked and self._on_file_scope_toggled(False)
         )
         scope_group = QGroupBox("Sign scope")
         scope_layout = QVBoxLayout(scope_group)
@@ -79,6 +79,9 @@ class SignControlPanel(QWidget):
             self._page_scope_radios[scope] = radio
             page_scope_layout.addWidget(radio)
         self._page_scope_radios[SignPageScope.ALL].setChecked(True)
+        # "Current page" only makes sense when signing a single file - the
+        # default file scope is "All files in the list", so start disabled.
+        self._page_scope_radios[SignPageScope.CURRENT].setEnabled(False)
         layout.addWidget(page_scope_group)
 
         self._cert_status_label = QLabel("")
@@ -100,6 +103,15 @@ class SignControlPanel(QWidget):
         self._summary_label.setWordWrap(True)
         layout.addWidget(self._progress_bar)
         layout.addWidget(self._summary_label)
+
+    def _on_file_scope_toggled(self, current_only: bool) -> None:
+        current_page_radio = self._page_scope_radios[SignPageScope.CURRENT]
+        current_page_radio.setEnabled(current_only)
+        if not current_only and current_page_radio.isChecked():
+            # "Current page" only means something for a single file - fall
+            # back to "All pages" when switching to "All files in the list".
+            self._page_scope_radios[SignPageScope.ALL].setChecked(True)
+        self.file_scope_changed.emit(current_only)
 
     def _on_template_index_changed(self, _index: int) -> None:
         self.template_changed.emit(self._template_combo.currentData() or "")
@@ -133,6 +145,9 @@ class SignControlPanel(QWidget):
         radio.blockSignals(True)
         radio.setChecked(True)
         radio.blockSignals(False)
+        # Keep "Current page" availability in sync even though the toggled
+        # signal was suppressed above.
+        self._page_scope_radios[SignPageScope.CURRENT].setEnabled(current_only)
 
     def current_page_scope(self) -> SignPageScope:
         for scope, radio in self._page_scope_radios.items():
@@ -141,7 +156,11 @@ class SignControlPanel(QWidget):
         return SignPageScope.ALL
 
     def set_page_scope(self, scope: SignPageScope) -> None:
-        """Restore a saved preference - does not emit page_scope_changed."""
+        """Restore a saved preference - does not emit page_scope_changed.
+        Falls back to "All pages" for a saved "Current page" preference if
+        the file scope doesn't allow it (single-file only)."""
+        if scope == SignPageScope.CURRENT and not self._page_scope_radios[SignPageScope.CURRENT].isEnabled():
+            scope = SignPageScope.ALL
         radio = self._page_scope_radios.get(scope)
         if radio is None:
             return

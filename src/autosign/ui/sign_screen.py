@@ -220,7 +220,7 @@ class SignScreen(QWidget):
             return
         self._load_preview(path)
 
-    def _load_preview(self, path: Path) -> None:
+    def _load_preview(self, path: Path, target_page: int = 0) -> None:
         try:
             info = self._pdf_inspect.get_info(path)
         except PdfInspectError as exc:
@@ -231,7 +231,7 @@ class SignScreen(QWidget):
         signed_output = self._resolve_output_path(path)
         self._current_signed_pages = get_signed_pages(signed_output) if signed_output.exists() else set()
         self._viewer.load(
-            str(path), info.page_sizes, str(signed_output), self._current_signed_pages
+            str(path), info.page_sizes, str(signed_output), self._current_signed_pages, target_page
         )
         self._on_viewer_state_changed()
         self.current_file_changed.emit(path)
@@ -421,8 +421,12 @@ class SignScreen(QWidget):
         self._refresh_file_list()
         if result.is_success and result.file_path == self._current_file:
             # Reload so the just-signed page(s) switch to rendering the real
-            # embedded signature instead of the placeholder box.
-            self._load_preview(result.file_path)
+            # embedded signature instead of the placeholder box, staying on
+            # the page the user was looking at (the one just signed, in the
+            # common "sign current page" workflow) rather than jumping to
+            # page 1.
+            target_page = self._viewer.current_page()
+            self._load_preview(result.file_path, target_page)
             self._sync_preview_overlay()
 
     def _on_finished(self, results: list) -> None:
