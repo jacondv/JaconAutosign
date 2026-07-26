@@ -115,7 +115,11 @@ class SettingsScreen(QWidget):
         return column
 
     def _build_output_column(self) -> QVBoxLayout:
-        self._subfolder_radio = QRadioButton("Subfolder named \"signed\" next to the source file")
+        self._subfolder_radio = QRadioButton("Subfolder named \"Signed_<signer name>\" next to the source file")
+        self._subfolder_radio.setToolTip(
+            "e.g. signing a file in Downloads writes to Downloads/Signed_<your name>/.\n"
+            "To sign in place, point the custom folder below at the source folder itself."
+        )
         self._custom_radio = QRadioButton("Custom folder:")
         self._custom_dir_edit = QLineEdit()
         browse_out_btn = QPushButton("Browse...")

@@ -29,6 +29,8 @@ class PdfViewerWidget(QWidget):
     def __init__(self, parent: QWidget | None = None, show_toolbar: bool = True):
         super().__init__(parent)
         self._pdf_path: str | None = None
+        self._signed_path: str | None = None  # output file with real signatures, if any
+        self._signed_pages: set[int] = set()
         self._page_sizes: list[PageSize] = []
         self._current_page = 0
         self._zoom = 1.0
@@ -106,14 +108,29 @@ class PdfViewerWidget(QWidget):
         return row
 
     # ------------------------------------------------------------ document
-    def load(self, pdf_path: str, page_sizes: list[PageSize]) -> None:
+    def load(
+        self,
+        pdf_path: str,
+        page_sizes: list[PageSize],
+        signed_path: str | None = None,
+        signed_pages: set[int] | None = None,
+    ) -> None:
+        """`signed_path`/`signed_pages`: when a page is already signed, it's
+        rendered from the signed output file instead of `pdf_path` so the
+        real embedded signature shows, not just a placeholder box. Signing
+        never changes page count/order, so page indices line up between the
+        two files."""
         self._pdf_path = pdf_path
+        self._signed_path = signed_path
+        self._signed_pages = set(signed_pages) if signed_pages else set()
         self._page_sizes = page_sizes
         self._current_page = 0
         self.show_page(0)
 
     def clear(self) -> None:
         self._pdf_path = None
+        self._signed_path = None
+        self._signed_pages = set()
         self._page_sizes = []
         self._current_page = 0
         self._canvas.set_boxes({})
@@ -138,6 +155,9 @@ class PdfViewerWidget(QWidget):
     def set_boxes(self, boxes: dict, labels: dict | None = None) -> None:
         self._canvas.set_boxes(boxes, labels)
 
+    def is_page_signed(self, index: int) -> bool:
+        return index in self._signed_pages
+
     def set_backdrop_color(self, color) -> None:
         self._canvas.set_backdrop_color(color)
 
@@ -146,7 +166,8 @@ class PdfViewerWidget(QWidget):
         if not self._pdf_path or not (0 <= index < len(self._page_sizes)):
             return
         self._current_page = index
-        image = render_page_to_qimage(self._pdf_path, index, dpi=round(self.dpi()))
+        render_path = self._signed_path if (self._signed_path and index in self._signed_pages) else self._pdf_path
+        image = render_page_to_qimage(render_path, index, dpi=round(self.dpi()))
         self._canvas.set_page_image(image)
         self._page_label.setText(f"Page {index + 1}/{len(self._page_sizes)}")
         self._prev_btn.setEnabled(index > 0)

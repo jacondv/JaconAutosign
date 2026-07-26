@@ -12,6 +12,7 @@ right - matching Acrobat's default layout when signing with a certificate
 from __future__ import annotations
 
 import io
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -79,7 +80,14 @@ class SigningEngine:
             raise SigningError(f"Signing error: {exc}") from exc
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(pdf_bytes)
+        # Write to a temp file then atomically replace - this can be the
+        # source file itself (overwrite-original output mode) or a
+        # previously-signed output being extended with another page's
+        # signature, so a plain truncate-write risks leaving a corrupt file
+        # behind if interrupted midway.
+        tmp_path = output_path.with_name(output_path.name + ".autosign-tmp")
+        tmp_path.write_bytes(pdf_bytes)
+        os.replace(tmp_path, output_path)
 
     def _apply_one_field(
         self,

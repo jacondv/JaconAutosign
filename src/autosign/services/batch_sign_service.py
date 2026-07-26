@@ -26,22 +26,11 @@ class FileSignResult:
         return self.status == "success"
 
 
-@dataclass
-class PrecheckResult:
-    file_path: Path
-    page_count: Optional[int]
-    warning: Optional[str]  # None = no warning
-
-
 ProgressCallback = Callable[[int, int, FileSignResult], None]
 CancelCheck = Callable[[], bool]
 
 
 class BatchSignService:
-    """signing_engine may be left unset when only a precheck (page-count
-    validation, no certificate password needed yet) is required - it must be
-    provided before calling run()."""
-
     def __init__(
         self,
         pdf_inspect_service: PdfInspectService,
@@ -49,32 +38,6 @@ class BatchSignService:
     ):
         self._pdf_inspect = pdf_inspect_service
         self._engine = signing_engine
-
-    def precheck(
-        self,
-        files: list[Path],
-        template: Template,
-        page_scope: SignPageScope = SignPageScope.ALL,
-        current_page_index: Optional[int] = None,
-    ) -> list[PrecheckResult]:
-        """Check each file has the page(s) `page_scope` requires, upfront (F3.4)."""
-        results = []
-        for file_path in files:
-            try:
-                info = self._pdf_inspect.get_info(file_path)
-            except PdfInspectError as exc:
-                results.append(PrecheckResult(file_path, None, str(exc)))
-                continue
-
-            indices = page_scope.resolve_indices(info.page_count, current_page_index)
-            warning = (
-                f"Missing required page: {page_scope.describe()} "
-                f"(file has {info.page_count} page(s))"
-                if not indices and template.signature_boxes
-                else None
-            )
-            results.append(PrecheckResult(file_path, info.page_count, warning))
-        return results
 
     def run(
         self,
@@ -107,12 +70,19 @@ class BatchSignService:
         page_scope: SignPageScope,
         current_page_index: Optional[int],
     ) -> FileSignResult:
+        output_path = output_dir / file_path.name
+        # If this file was already (partially) signed in an earlier run,
+        # build on that output instead of the pristine source - otherwise
+        # e.g. signing "current page" twice for different pages would each
+        # start over from scratch and only the second signature would
+        # survive. Overwrite-original output mode already has output_path
+        # == file_path, so this is a no-op there.
+        basis_path = output_path if output_path.exists() else file_path
         try:
-            info = self._pdf_inspect.get_info(file_path)
+            info = self._pdf_inspect.get_info(basis_path)
         except PdfInspectError as exc:
             return FileSignResult(file_path, status="failed", error_reason=str(exc))
 
-        output_path = output_dir / file_path.name
         try:
             self._engine.sign_file(info, template, output_path, page_scope, current_page_index)
         except SigningError as exc:

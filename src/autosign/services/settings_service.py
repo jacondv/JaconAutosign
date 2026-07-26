@@ -7,14 +7,17 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
 from ..security import DpapiUnavailableError, protect, unprotect
 
-OUTPUT_MODE_SUBFOLDER = "subfolder"  # "signed/" next to the source file
+OUTPUT_MODE_SUBFOLDER = "subfolder"  # "Signed_<signer name>/" next to the source file
 OUTPUT_MODE_CUSTOM = "custom"  # a fixed folder chosen by the user
+
+_INVALID_FOLDER_CHARS = re.compile(r'[\\/:*?"<>|]')
 
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
@@ -86,6 +89,21 @@ class SettingsService:
     def resolve_output_dir(self, settings: AppSettings, source_file: Optional[Path]) -> Path:
         if settings.output_mode == OUTPUT_MODE_CUSTOM and settings.custom_output_dir:
             return Path(settings.custom_output_dir)
+        folder_name = self._default_folder_name(settings)
         if source_file is not None:
-            return source_file.parent / "signed"
-        return Path("signed")
+            return source_file.parent / folder_name
+        return Path(folder_name)
+
+    @staticmethod
+    def _default_folder_name(settings: AppSettings) -> str:
+        signer_name = (settings.signer_name or "").strip()
+        if not signer_name:
+            return "Signed"
+        return f"Signed_{_INVALID_FOLDER_CHARS.sub('_', signer_name)}"
+
+    def resolve_output_path(self, settings: AppSettings, source_file: Path) -> Path:
+        """The exact file that a signing run will write to for `source_file`
+        (dir + same filename) - a convenience for callers (e.g. the preview
+        and Reset feature) that need to check the previous result on disk
+        without duplicating the output_mode logic above."""
+        return self.resolve_output_dir(settings, source_file) / source_file.name

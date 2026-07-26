@@ -1,6 +1,7 @@
-"""The queued-files list: add/remove/clear controls plus inline status
-coloring (signed / error / precheck warning). Knows nothing about signing or
-templates - callers feed it warnings/statuses and react to its signals.
+"""The queued-files list: add/remove/clear controls plus an inline
+"[x/y Signed]" page count. Knows nothing about signing or templates -
+callers feed it page counts and react to its signals. Signing errors are
+reported via a popup by the caller, not shown inline here.
 """
 from __future__ import annotations
 
@@ -26,11 +27,11 @@ class FileListPanel(QWidget):
     selection_changed = Signal(object)  # Path | None
     file_activated = Signal(Path)  # double-click
     files_changed = Signal()  # files were added/removed/cleared - caller should refresh()
+    reset_requested = Signal(list)  # list[Path] - the selected files
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._files: list[Path] = []
-        self._statuses: dict[Path, str] = {}
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -47,9 +48,13 @@ class FileListPanel(QWidget):
         buttons = QHBoxLayout()
         remove_btn = QPushButton("Remove")
         remove_btn.clicked.connect(self.remove_selected)
+        reset_btn = QPushButton("Reset")
+        reset_btn.setToolTip("Discard the signed output for the selected file(s) so the next Sign starts over from the original.")
+        reset_btn.clicked.connect(lambda: self.reset_requested.emit(self.selected_files()))
         clear_btn = QPushButton("Clear")
         clear_btn.clicked.connect(self.clear)
         buttons.addWidget(remove_btn)
+        buttons.addWidget(reset_btn)
         buttons.addWidget(clear_btn)
         layout.addLayout(buttons)
 
@@ -62,6 +67,9 @@ class FileListPanel(QWidget):
     def current_path(self) -> Path | None:
         item = self._list.currentItem()
         return item.data(_ROLE_PATH) if item else None
+
+    def selected_files(self) -> list[Path]:
+        return [item.data(_ROLE_PATH) for item in self._list.selectedItems()]
 
     def add_files(self, paths: Iterable[Path]) -> list[Path]:
         """Returns the subset of `paths` that were actually newly added
@@ -99,35 +107,26 @@ class FileListPanel(QWidget):
 
     def clear(self) -> None:
         self._files.clear()
-        self._statuses.clear()
         self.files_changed.emit()
 
-    def set_status(self, path: Path, status: str) -> None:
-        self._statuses[path] = status
-
     # ------------------------------------------------------------ render
-    def refresh(self, warnings: dict[Path, str] | None = None) -> None:
-        """Rebuild the list widget from current files/statuses. `warnings`
-        (e.g. precheck results) are only shown for files with no status yet."""
-        warnings = warnings or {}
+    def refresh(self, page_counts: dict[Path, tuple[int, int]] | None = None) -> None:
+        """Rebuild the list widget from current files. `page_counts` maps a
+        file to (signed_pages, total_pages), shown as "[x/y Signed]"."""
+        page_counts = page_counts or {}
         current_path = self.current_path
         self._list.blockSignals(True)
         self._list.clear()
         current_item = None
         for path in self._files:
-            status = self._statuses.get(path)
-            warning = warnings.get(path)
             text = path.name
             color = None
-            if status == "success":
-                text += "  -  Signed"
-                color = Qt.GlobalColor.darkGreen
-            elif status is not None:
-                text += f"  -  Error: {status}"
-                color = Qt.GlobalColor.red
-            elif warning:
-                text += f"  -  {warning}"
-                color = Qt.GlobalColor.darkYellow
+            counts = page_counts.get(path)
+            if counts is not None:
+                signed, total = counts
+                text += f"  [{signed}/{total} Signed]"
+                if signed > 0:
+                    color = Qt.GlobalColor.darkGreen
             item = QListWidgetItem(text)
             item.setData(_ROLE_PATH, path)
             item.setToolTip(str(path))

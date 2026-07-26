@@ -111,6 +111,7 @@ class SignScreen(QWidget):
         self._file_panel.files_changed.connect(self._refresh_file_list)
         self._file_panel.selection_changed.connect(self._on_file_selection_changed)
         self._file_panel.file_activated.connect(self._open_output_for)
+        self._file_panel.reset_requested.connect(self._on_reset_requested)
         layout.addWidget(self._file_panel, 2)
 
         self._control_panel = SignControlPanel()
@@ -204,17 +205,7 @@ class SignScreen(QWidget):
                 self._file_panel.select_path(added[0])
 
     def _refresh_file_list(self) -> None:
-        template = self._current_template()
-        warnings = {}
-        if template:
-            precheck = BatchSignService(self._pdf_inspect).precheck(
-                self._file_panel.files,
-                template,
-                self._control_panel.current_page_scope(),
-                self._viewer.current_page() if self._current_file else None,
-            )
-            warnings = {r.file_path: r.warning for r in precheck if r.warning}
-        self._file_panel.refresh(warnings)
+        self._file_panel.refresh(self._compute_page_counts())
         if self._current_file is not None and self._current_file not in self._file_panel.files:
             self._current_file = None
             self._current_pdf_info = None
@@ -237,10 +228,32 @@ class SignScreen(QWidget):
             return
         self._current_file = path
         self._current_pdf_info = info
-        self._current_signed_pages = get_signed_pages(path)
-        self._viewer.load(str(path), info.page_sizes)
+        signed_output = self._resolve_output_path(path)
+        self._current_signed_pages = get_signed_pages(signed_output) if signed_output.exists() else set()
+        self._viewer.load(
+            str(path), info.page_sizes, str(signed_output), self._current_signed_pages
+        )
         self._on_viewer_state_changed()
         self.current_file_changed.emit(path)
+
+    def _resolve_output_path(self, source_path: Path) -> Path:
+        settings = self._settings_service.load()
+        return self._settings_service.resolve_output_path(settings, source_path)
+
+    def _compute_page_counts(self) -> dict[Path, tuple[int, int]]:
+        """(signed_pages, total_pages) per queued file, for the file-list
+        display - signed_pages comes from whatever output already exists on
+        disk, not from any particular signing run."""
+        counts: dict[Path, tuple[int, int]] = {}
+        for path in self._file_panel.files:
+            try:
+                info = self._pdf_inspect.get_info(path)
+            except PdfInspectError:
+                continue
+            output_path = self._resolve_output_path(path)
+            signed = len(get_signed_pages(output_path)) if output_path.exists() else 0
+            counts[path] = (signed, info.page_count)
+        return counts
 
     def _sync_preview_overlay(self) -> None:
         template = self._current_template()
@@ -248,17 +261,20 @@ class SignScreen(QWidget):
         labels: dict[str, str] = {}
         if template and self._current_pdf_info:
             page_index = self._viewer.current_page()
-            dpi = self._viewer.dpi()
-            for box in template.signature_boxes:
-                indices = box.page_ref.resolve_indices(self._current_pdf_info.page_count)
-                if page_index not in indices:
-                    continue
-                rect = box.rect
-                actual_size = self._current_pdf_info.page_size(page_index)
-                if actual_size.differs_from(box.page_size_at_design_time):
-                    rect = rect.scaled_to(box.page_size_at_design_time, actual_size)
-                pixel_boxes[box.box_id] = pdf_rect_to_pixel(rect, actual_size, dpi)
-                labels[box.box_id] = box.label
+            # Already-signed pages render the real embedded signature (see
+            # _load_preview) - the placeholder box would just overlap it.
+            if page_index not in self._current_signed_pages:
+                dpi = self._viewer.dpi()
+                for box in template.signature_boxes:
+                    indices = box.page_ref.resolve_indices(self._current_pdf_info.page_count)
+                    if page_index not in indices:
+                        continue
+                    rect = box.rect
+                    actual_size = self._current_pdf_info.page_size(page_index)
+                    if actual_size.differs_from(box.page_size_at_design_time):
+                        rect = rect.scaled_to(box.page_size_at_design_time, actual_size)
+                    pixel_boxes[box.box_id] = pdf_rect_to_pixel(rect, actual_size, dpi)
+                    labels[box.box_id] = box.label
         self._viewer.set_boxes(pixel_boxes, labels)
 
     # -------------------------------------------------------------- template
@@ -395,9 +411,19 @@ class SignScreen(QWidget):
 
     def _on_progress(self, done: int, total: int, result) -> None:
         self._control_panel.set_progress_value(done)
-        self._file_panel.set_status(result.file_path, "success" if result.is_success else (result.error_reason or "error"))
         self._results[result.file_path] = result
+        if not result.is_success:
+            QMessageBox.warning(
+                self,
+                "Signing failed",
+                f"{result.file_path.name}:\n{result.error_reason or 'Unknown error.'}",
+            )
         self._refresh_file_list()
+        if result.is_success and result.file_path == self._current_file:
+            # Reload so the just-signed page(s) switch to rendering the real
+            # embedded signature instead of the placeholder box.
+            self._load_preview(result.file_path)
+            self._sync_preview_overlay()
 
     def _on_finished(self, results: list) -> None:
         self._set_running(False)
@@ -412,6 +438,48 @@ class SignScreen(QWidget):
             # other pending queued deliveries of that same signal.
             self._worker.deleteLater()
             self._worker = None
+
+    # ----------------------------------------------------------------- reset
+    def _on_reset_requested(self, paths: list[Path]) -> None:
+        if not paths:
+            return
+        # If the output folder is pointed at the source's own folder, the
+        # output IS the source - nothing to safely discard.
+        same_as_source = [p for p in paths if self._resolve_output_path(p) == p]
+        resettable = [p for p in paths if p not in same_as_source]
+        to_delete = [p for p in resettable if self._resolve_output_path(p).exists()]
+        if not to_delete:
+            message = (
+                "The output folder for these file(s) is the same as their source folder, "
+                "so there is no separate signed copy to discard."
+                if same_as_source and not resettable
+                else "None of the selected file(s) have a signed output yet."
+            )
+            QMessageBox.information(self, "Nothing to reset", message)
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Reset signing",
+            f"Discard the signed output for {len(to_delete)} file(s)? The next Sign will "
+            "start over from the original file(s).",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        for path in to_delete:
+            output_path = self._resolve_output_path(path)
+            try:
+                output_path.unlink()
+            except OSError as exc:
+                QMessageBox.warning(self, "Could not reset", f"{path.name}: {exc}")
+                continue
+            self._results.pop(path, None)
+
+        self._refresh_file_list()
+        if self._current_file in to_delete:
+            self._load_preview(self._current_file)
+            self._sync_preview_overlay()
 
     # ---------------------------------------------------------------- output
     def _open_output_for(self, path: Path) -> None:

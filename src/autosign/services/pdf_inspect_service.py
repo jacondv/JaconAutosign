@@ -36,8 +36,13 @@ class PdfInspectService:
                 page_sizes = []
                 for i in range(len(doc)):
                     page = doc[i]
-                    width, height = page.get_size()
-                    rotation = page.get_rotation()
+                    try:
+                        width, height = page.get_size()
+                        rotation = page.get_rotation()
+                    finally:
+                        # Close explicitly rather than leaving it for the GC
+                        # - see the matching comment in ui/pdf_render.py.
+                        page.close()
                     page_sizes.append(PageSize(width=width, height=height, rotation=rotation))
                 return PdfInfo(path=path, page_count=len(doc), page_sizes=page_sizes)
             finally:
