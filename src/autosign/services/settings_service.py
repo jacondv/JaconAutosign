@@ -44,6 +44,7 @@ class AppSettings:
     shortcut_sign: str = DEFAULT_SHORTCUT_SIGN
     last_file_scope_current_only: bool = False
     last_page_scope: str = DEFAULT_PAGE_SCOPE
+    last_open_dir: Optional[str] = None
 
 
 class SettingsService:

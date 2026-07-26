@@ -161,7 +161,9 @@ class TemplateDesignerScreen(QWidget):
     def _render_current_page(self) -> None:
         if not self._pdf_info:
             return
-        image = render_page_to_qimage(str(self._pdf_path), self._current_page)
+        image = render_page_to_qimage(
+            str(self._pdf_path), self._current_page, device_pixel_ratio=self.devicePixelRatioF() or 1.0
+        )
         self._canvas.set_page_image(image)
         self._page_label.setText(f"Page {self._current_page + 1}/{self._pdf_info.page_count}")
         self._prev_btn.setEnabled(self._current_page > 0)

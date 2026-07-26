@@ -229,7 +229,9 @@ class PdfViewerWidget(QWidget):
             return
         self._current_page = index
         render_path = self._signed_path if (self._signed_path and index in self._signed_pages) else self._pdf_path
-        image = render_page_to_qimage(render_path, index, dpi=round(self.dpi()))
+        image = render_page_to_qimage(
+            render_path, index, dpi=round(self.dpi()), device_pixel_ratio=self.devicePixelRatioF() or 1.0
+        )
         self._canvas.set_page_image(image)
         self._page_label.setText(f"Page {index + 1}/{len(self._page_sizes)}")
         self._prev_btn.setEnabled(index > 0)

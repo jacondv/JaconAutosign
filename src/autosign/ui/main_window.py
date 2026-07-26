@@ -4,7 +4,9 @@ opening as a full-window overlay when creating/editing a template.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -27,7 +29,7 @@ from .widgets import RibbonBar
 class MainWindow(QMainWindow):
     def __init__(self, initial_theme: str = theme.THEME_LIGHT):
         super().__init__()
-        self._base_title = "Autosign - Batch PDF Signing"
+        self._base_title = "AutoSign - Batch PDF Signing"
         self.setWindowTitle(self._base_title)
         self.resize(1400, 860)
         self._shortcuts: list[QShortcut] = []
@@ -69,7 +71,39 @@ class MainWindow(QMainWindow):
         self._outer_stack.addWidget(main_page)
 
         self._transient_screen: TemplateDesignerScreen | None = None
+        self._clipboard_autoload_done = False
         self._apply_shortcuts()
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().showEvent(event)
+        if not self._clipboard_autoload_done:
+            self._clipboard_autoload_done = True
+            # Deferred to the next event-loop iteration rather than done
+            # directly here, same reasoning as the old startup password
+            # prompt: touching things synchronously inside showEvent can
+            # wedge showMaximized() on real Windows.
+            QTimer.singleShot(0, self._autoload_from_clipboard)
+
+    def _autoload_from_clipboard(self) -> None:
+        """If the user copied a path (e.g. "Copy as path" in Explorer)
+        before opening the app, feed it to SignScreen.open_from_startup_path
+        - a copied file opens directly, a copied folder pre-navigates the
+        Open Files dialog to it, and anything else falls back to that
+        dialog at the last folder used (see SignScreen for the full rule)."""
+        app = QApplication.instance()
+        path = None
+        if isinstance(app, QApplication):
+            clipboard_text = app.clipboard().text().strip()
+            if clipboard_text:
+                # "Copy as path" in Explorer wraps it in quotes; only look
+                # at the first line if several paths were copied at once.
+                text = clipboard_text.splitlines()[0].strip().strip('"')
+                if text:
+                    try:
+                        path = Path(text)
+                    except (OSError, ValueError):
+                        path = None
+        self._sign_screen.open_from_startup_path(path)
 
     def _wire_ribbon(self) -> None:
         r = self._ribbon

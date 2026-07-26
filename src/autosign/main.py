@@ -1,8 +1,10 @@
-"""Autosign application entry point."""
+"""AutoSign application entry point."""
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from .config import settings_file
@@ -10,10 +12,14 @@ from .services import SettingsService
 from .ui import theme
 from .ui.main_window import MainWindow
 
+_ICON_PATH = Path(__file__).parent / "ui" / "asset" / "AutoSign.ico"
+
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("Autosign")
+    app.setApplicationName("AutoSign")
+    if _ICON_PATH.exists():
+        app.setWindowIcon(QIcon(str(_ICON_PATH)))
     # Fusion is a style Qt paints itself rather than delegating to the OS -
     # combined with the app-wide stylesheet below, this is what keeps every
     # color independent of the Windows light/dark theme (see ui/theme.py).

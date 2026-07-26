@@ -60,7 +60,12 @@ class PageCanvas(QWidget):
 
     def set_page_image(self, image: QImage) -> None:
         self._pixmap = QPixmap.fromImage(image)
-        self.setFixedSize(self._pixmap.size())
+        # QPixmap.size() is the *physical* pixel size (device_pixel_ratio
+        # already multiplied in, for HiDPI sharpness - see pdf_render.py);
+        # the widget itself must be sized in logical/device-independent
+        # pixels, or the canvas ends up bigger than the page actually
+        # paints at, leaving a gray backdrop margin around it.
+        self.setFixedSize(self._pixmap.deviceIndependentSize().toSize())
         self.update()
 
     def set_boxes(self, boxes: dict[str, QRectF], labels: dict[str, str] | None = None) -> None:
@@ -206,7 +211,11 @@ class PageCanvas(QWidget):
     def _clamp_to_canvas(self, rect: QRectF) -> QRectF:
         if self._pixmap is None:
             return rect
-        bounds = QRectF(0, 0, self._pixmap.width(), self._pixmap.height())
+        # Mouse coordinates are in logical/device-independent pixels (like
+        # the widget's own size) - bound against that, not the pixmap's
+        # physical pixel size (see the comment in set_page_image).
+        size = self._pixmap.deviceIndependentSize()
+        bounds = QRectF(0, 0, size.width(), size.height())
         x = min(max(rect.x(), bounds.left()), bounds.right() - rect.width())
         y = min(max(rect.y(), bounds.top()), bounds.bottom() - rect.height())
         return QRectF(x, y, rect.width(), rect.height())

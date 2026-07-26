@@ -191,18 +191,49 @@ class SignScreen(QWidget):
         self.viewer_status_changed.emit(status)
 
     # -------------------------------------------------------------- files
-    def open_files(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Open PDF files", "", "PDF (*.pdf)")
-        added = self._file_panel.add_files(Path(p) for p in paths)
+    def open_files(self, start_dir: str | None = None) -> None:
+        directory = start_dir or self._last_open_dir()
+        paths, _ = QFileDialog.getOpenFileNames(self, "Open PDF files", directory, "PDF (*.pdf)")
+        if paths:
+            self._remember_open_dir(Path(paths[0]).parent)
+        self._add_and_select(Path(p) for p in paths)
+
+    def open_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Open folder", self._last_open_dir())
+        if folder:
+            self._remember_open_dir(Path(folder))
+            self._add_and_select(sorted(Path(folder).glob("*.pdf")))
+
+    def open_from_startup_path(self, path: Path | None) -> None:
+        """Startup clipboard integration (see MainWindow): a copied PDF
+        file opens directly; a copied folder pre-navigates the Open Files
+        dialog to it; anything else (no path, garbage, or one that no
+        longer exists) opens the dialog at the last folder used."""
+        if path is not None:
+            try:
+                if path.is_file() and path.suffix.lower() == ".pdf":
+                    self._remember_open_dir(path.parent)
+                    self._add_and_select([path])
+                    return
+                if path.is_dir():
+                    self.open_files(start_dir=str(path))
+                    return
+            except OSError:
+                pass
+        self.open_files()
+
+    def _add_and_select(self, paths) -> None:
+        added = self._file_panel.add_files(paths)
         if added:
             self._file_panel.select_path(added[0])
 
-    def open_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Open folder")
-        if folder:
-            added = self._file_panel.add_files(sorted(Path(folder).glob("*.pdf")))
-            if added:
-                self._file_panel.select_path(added[0])
+    def _last_open_dir(self) -> str:
+        return self._settings_service.load().last_open_dir or ""
+
+    def _remember_open_dir(self, directory: Path) -> None:
+        settings = self._settings_service.load()
+        settings.last_open_dir = str(directory)
+        self._settings_service.save(settings)
 
     def _refresh_file_list(self) -> None:
         self._file_panel.refresh(self._compute_page_counts())

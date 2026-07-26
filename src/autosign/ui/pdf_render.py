@@ -10,10 +10,21 @@ from PySide6.QtGui import QImage
 
 from ..pdfium_lock import PDFIUM_LOCK
 
-DEFAULT_PREVIEW_DPI = 150
+DEFAULT_PREVIEW_DPI = 200
 
 
-def render_page_to_qimage(pdf_path: str, page_index: int, dpi: int = DEFAULT_PREVIEW_DPI) -> QImage:
+def render_page_to_qimage(
+    pdf_path: str,
+    page_index: int,
+    dpi: int = DEFAULT_PREVIEW_DPI,
+    device_pixel_ratio: float = 1.0,
+) -> QImage:
+    """`device_pixel_ratio`: the screen's actual scale factor (e.g. 1.25 on
+    a 125%-scaled Windows display). Rendering the bitmap at dpi *
+    device_pixel_ratio pixels but tagging the QImage with that ratio makes
+    Qt display it at native screen resolution instead of upscaling a
+    lower-res bitmap - otherwise text looks visibly blurrier than a
+    HiDPI-aware viewer like Foxit Reader on scaled displays."""
     with PDFIUM_LOCK:  # pdfium is not thread-safe - see pdfium_lock.py
         doc = pdfium.PdfDocument(pdf_path)
         page = None
@@ -24,11 +35,13 @@ def render_page_to_qimage(pdf_path: str, page_index: int, dpi: int = DEFAULT_PRE
             # widgets would render as a blank page.
             doc.init_forms()
             page = doc[page_index]
-            bitmap = page.render(scale=dpi / 72)
+            physical_dpi = dpi * device_pixel_ratio
+            bitmap = page.render(scale=physical_dpi / 72)
             raw = bytes(bitmap.buffer)
             image = QImage(
                 raw, bitmap.width, bitmap.height, bitmap.stride, QImage.Format.Format_BGR888
             )
+            image.setDevicePixelRatio(device_pixel_ratio)
             return image.copy()  # copy() because the source buffer is freed once the doc closes
         finally:
             # Close the page explicitly (under the lock) rather than letting

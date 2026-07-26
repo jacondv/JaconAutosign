@@ -4,8 +4,11 @@ from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
+ICON_PATH = "src/autosign/ui/asset/AutoSign.ico"
+
 datas = []
 datas += collect_data_files("pypdfium2")
+datas += [(ICON_PATH, "autosign/ui/asset")]
 
 a = Analysis(
     ["entry_point.py"],
@@ -26,11 +29,12 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Autosign",
+    name="AutoSign",
     debug=False,
     strip=False,
     upx=False,
     console=False,
+    icon=ICON_PATH,
 )
 
 coll = COLLECT(
@@ -39,5 +43,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="Autosign",
+    name="AutoSign",
 )

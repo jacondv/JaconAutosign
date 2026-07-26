@@ -16,5 +16,5 @@ Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 .\.venv\Scripts\python.exe -m PyInstaller autosign.spec --noconfirm
 
 Write-Host ""
-Write-Host "Da dong goi xong. File chay: dist\Autosign\Autosign.exe"
-Write-Host "Copy ca thu muc dist\Autosign sang may khac de cai dat/chay (khong can cai Python)."
+Write-Host "Da dong goi xong. File chay: dist\AutoSign\AutoSign.exe"
+Write-Host "Copy ca thu muc dist\AutoSign sang may khac de cai dat/chay (khong can cai Python)."
