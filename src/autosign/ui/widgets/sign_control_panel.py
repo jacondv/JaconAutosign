@@ -17,11 +17,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...models import SignPageScope
+
+_PAGE_SCOPE_LABELS = {
+    SignPageScope.CURRENT: "Current page",
+    SignPageScope.FIRST: "First page",
+    SignPageScope.LAST: "Last page",
+    SignPageScope.ALL: "All pages",
+}
+
+
 class SignControlPanel(QWidget):
     template_changed = Signal(str)  # template_id, "" if none selected
     manage_templates_requested = Signal()
     sign_requested = Signal()
     cancel_requested = Signal()
+    file_scope_changed = Signal(bool)  # True = current file only
+    page_scope_changed = Signal(str)  # SignPageScope value
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -44,11 +56,30 @@ class SignControlPanel(QWidget):
         self._scope_current_radio = QRadioButton("Current file only")
         self._scope_all_radio = QRadioButton("All files in the list")
         self._scope_all_radio.setChecked(True)
+        self._scope_current_radio.toggled.connect(
+            lambda checked: checked and self.file_scope_changed.emit(True)
+        )
+        self._scope_all_radio.toggled.connect(
+            lambda checked: checked and self.file_scope_changed.emit(False)
+        )
         scope_group = QGroupBox("Sign scope")
         scope_layout = QVBoxLayout(scope_group)
         scope_layout.addWidget(self._scope_current_radio)
         scope_layout.addWidget(self._scope_all_radio)
         layout.addWidget(scope_group)
+
+        self._page_scope_radios: dict[SignPageScope, QRadioButton] = {}
+        page_scope_group = QGroupBox("Page scope")
+        page_scope_layout = QVBoxLayout(page_scope_group)
+        for scope, text in _PAGE_SCOPE_LABELS.items():
+            radio = QRadioButton(text)
+            radio.toggled.connect(
+                lambda checked, s=scope: checked and self.page_scope_changed.emit(s.value)
+            )
+            self._page_scope_radios[scope] = radio
+            page_scope_layout.addWidget(radio)
+        self._page_scope_radios[SignPageScope.ALL].setChecked(True)
+        layout.addWidget(page_scope_group)
 
         self._cert_status_label = QLabel("")
         self._cert_status_label.setWordWrap(True)
@@ -95,6 +126,29 @@ class SignControlPanel(QWidget):
     def is_current_file_only(self) -> bool:
         return self._scope_current_radio.isChecked()
 
+    def set_file_scope(self, current_only: bool) -> None:
+        """Restore a saved preference - does not emit file_scope_changed
+        (mirrors set_templates(), a reload rather than a user action)."""
+        radio = self._scope_current_radio if current_only else self._scope_all_radio
+        radio.blockSignals(True)
+        radio.setChecked(True)
+        radio.blockSignals(False)
+
+    def current_page_scope(self) -> SignPageScope:
+        for scope, radio in self._page_scope_radios.items():
+            if radio.isChecked():
+                return scope
+        return SignPageScope.ALL
+
+    def set_page_scope(self, scope: SignPageScope) -> None:
+        """Restore a saved preference - does not emit page_scope_changed."""
+        radio = self._page_scope_radios.get(scope)
+        if radio is None:
+            return
+        radio.blockSignals(True)
+        radio.setChecked(True)
+        radio.blockSignals(False)
+
     # ------------------------------------------------------------ cert status
     def set_cert_status(self, text: str) -> None:
         self._cert_status_label.setText(text)
@@ -106,6 +160,8 @@ class SignControlPanel(QWidget):
         self._template_combo.setEnabled(not running)
         self._scope_current_radio.setEnabled(not running)
         self._scope_all_radio.setEnabled(not running)
+        for radio in self._page_scope_radios.values():
+            radio.setEnabled(not running)
 
     def disable_cancel(self) -> None:
         """Cancel was clicked - grey it out while the worker winds down,

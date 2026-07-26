@@ -4,14 +4,10 @@ opening as a full-window overlay when creating/editing a template.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
-    QInputDialog,
-    QLineEdit,
     QMainWindow,
     QMessageBox,
     QStackedWidget,
@@ -21,7 +17,6 @@ from PySide6.QtWidgets import (
 
 from ..config import settings_file, templates_dir
 from ..services import PdfInspectService, SettingsService, TemplateService
-from ..signing import CertificateLoadError, Pkcs12CertificateProvider
 from . import theme
 from .settings_screen import SettingsScreen
 from .sign_screen import SignScreen, ViewerStatus
@@ -32,9 +27,9 @@ from .widgets import RibbonBar
 class MainWindow(QMainWindow):
     def __init__(self, initial_theme: str = theme.THEME_LIGHT):
         super().__init__()
-        self.setWindowTitle("Autosign - Batch PDF Signing")
+        self._base_title = "Autosign - Batch PDF Signing"
+        self.setWindowTitle(self._base_title)
         self.resize(1400, 860)
-        self._startup_prompt_shown = False
         self._shortcuts: list[QShortcut] = []
 
         self._template_service = TemplateService(templates_dir())
@@ -56,6 +51,7 @@ class MainWindow(QMainWindow):
         self._settings_screen.settings_saved.connect(self._sign_screen.refresh_cert_status)
         self._settings_screen.settings_saved.connect(self._apply_shortcuts)
         self._settings_screen.theme_changed.connect(self._apply_theme)
+        self._sign_screen.current_file_changed.connect(self._update_title)
 
         self._content_stack = QStackedWidget()
         self._content_stack.addWidget(self._sign_screen)
@@ -131,46 +127,8 @@ class MainWindow(QMainWindow):
             shortcut.activated.connect(handler)
             self._shortcuts.append(shortcut)
 
-    # --------------------------------------------------------- startup prompt
-    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        super().showEvent(event)
-        if not self._startup_prompt_shown:
-            self._startup_prompt_shown = True
-            # Deferred to the next event-loop iteration rather than called
-            # directly here: opening a modal dialog synchronously from
-            # inside showEvent() nests it into the same call stack as
-            # showMaximized()'s own window-manager activity, which can wedge
-            # the window on Windows instead of showing the prompt.
-            QTimer.singleShot(0, self.prompt_startup_password_if_needed)
-
-    def prompt_startup_password_if_needed(self) -> None:
-        """Called once, right when the window first becomes visible: if a
-        certificate is already configured, ask for its password so signing
-        doesn't interrupt the user later for it. Pre-filled with the
-        remembered password (if any) so accepting it is just Enter; wrong
-        password just leaves the session unprimed (the normal Sign-time
-        prompt still covers it) rather than blocking the app."""
-        settings = self._settings_service.load()
-        if not settings.last_pfx_path:
-            return
-
-        pfx_name = Path(settings.last_pfx_path).name
-        remembered = self._settings_service.get_remembered_password(settings) or ""
-        password, ok = QInputDialog.getText(
-            self,
-            "Certificate password",
-            f"Enter the password for {pfx_name} to sign with this session:",
-            QLineEdit.EchoMode.Password,
-            remembered,
-        )
-        if not ok or not password:
-            return
-        try:
-            Pkcs12CertificateProvider(Path(settings.last_pfx_path), password)
-        except CertificateLoadError as exc:
-            QMessageBox.warning(self, "Certificate error", str(exc))
-            return
-        self._sign_screen.set_session_password(password)
+    def _update_title(self, path) -> None:
+        self.setWindowTitle(f"{self._base_title} - {path.name}" if path else self._base_title)
 
     def _on_viewer_status(self, status: ViewerStatus) -> None:
         self._ribbon.set_page_label(status.page_label)

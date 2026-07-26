@@ -1,4 +1,5 @@
 from .geometry import PageSize, Rect
+from .sign_scope import SignPageScope
 from .template import Appearance, PageRef, PageRefType, SignatureBox, Template
 
 __all__ = [
@@ -9,4 +10,5 @@ __all__ = [
     "PageRefType",
     "SignatureBox",
     "Template",
+    "SignPageScope",
 ]

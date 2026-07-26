@@ -1,9 +1,10 @@
-"""Dialog to configure one signature box: label, page reference, signature image."""
+"""Dialog to configure one signature box: label and signature image. Which
+page(s) get signed is no longer decided here - it's chosen at sign time in
+the left panel (Page scope), applying uniformly to every box."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -12,18 +13,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
 )
 
 from ..models import Appearance, PageRef, PageRefType
-
-_PAGE_REF_LABELS = {
-    PageRefType.FIRST: "First page",
-    PageRefType.LAST: "Last page",
-    PageRefType.ALL: "All pages",
-    PageRefType.ABSOLUTE: "Specific page...",
-}
 
 
 class BoxEditDialog(QDialog):
@@ -43,21 +36,6 @@ class BoxEditDialog(QDialog):
 
         self._label_edit = QLineEdit(label or "Signature")
 
-        self._page_ref_combo = QComboBox()
-        for ref_type, text in _PAGE_REF_LABELS.items():
-            self._page_ref_combo.addItem(text, ref_type)
-
-        self._page_number_spin = QSpinBox()
-        self._page_number_spin.setRange(1, max(page_count, 1))
-        self._page_number_spin.setValue(current_page_number)
-
-        initial_type = page_ref.type if page_ref else PageRefType.ABSOLUTE
-        index = self._page_ref_combo.findData(initial_type)
-        self._page_ref_combo.setCurrentIndex(max(index, 0))
-        if page_ref and page_ref.type == PageRefType.ABSOLUTE and page_ref.page_number:
-            self._page_number_spin.setValue(page_ref.page_number)
-        self._page_ref_combo.currentIndexChanged.connect(self._update_page_number_visibility)
-
         self._image_path_label = QLabel(self._image_path or "(no image selected)")
         browse_btn = QPushButton("Choose signature image (.png)...")
         browse_btn.clicked.connect(self._browse_image)
@@ -74,8 +52,6 @@ class BoxEditDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("Label:", self._label_edit)
-        form.addRow("Applies to:", self._page_ref_combo)
-        form.addRow("Page number:", self._page_number_spin)
 
         image_row = QHBoxLayout()
         image_row.addWidget(self._image_path_label, 1)
@@ -97,12 +73,6 @@ class BoxEditDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(buttons)
 
-        self._update_page_number_visibility()
-
-    def _update_page_number_visibility(self) -> None:
-        is_absolute = self._page_ref_combo.currentData() == PageRefType.ABSOLUTE
-        self._page_number_spin.setEnabled(is_absolute)
-
     def _browse_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose signature image", "", "PNG image (*.png);;All files (*.*)"
@@ -115,12 +85,10 @@ class BoxEditDialog(QDialog):
         return self._label_edit.text().strip() or "Signature"
 
     def result_page_ref(self) -> PageRef:
-        # QComboBox/QVariant loses the Enum subtype when round-tripping through
-        # currentData(), returning a plain str - must coerce back explicitly.
-        ref_type = PageRefType(self._page_ref_combo.currentData())
-        if ref_type == PageRefType.ABSOLUTE:
-            return PageRef(type=ref_type, page_number=self._page_number_spin.value())
-        return PageRef(type=ref_type)
+        # Which page(s) get signed is now chosen at sign time (Page scope in
+        # the left panel), not per-box - every box just targets "all pages"
+        # in the template's own coordinate space.
+        return PageRef(type=PageRefType.ALL)
 
     def result_appearance(self) -> Appearance:
         return Appearance(

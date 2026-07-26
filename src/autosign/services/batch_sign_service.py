@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-from ..models import Template
+from ..models import SignPageScope, Template
 from ..signing.signing_engine import SigningEngine, SigningError
 from .pdf_inspect_service import PdfInspectError, PdfInspectService
 
@@ -50,8 +50,14 @@ class BatchSignService:
         self._pdf_inspect = pdf_inspect_service
         self._engine = signing_engine
 
-    def precheck(self, files: list[Path], template: Template) -> list[PrecheckResult]:
-        """Check each file's page count against the template's requirements upfront (F3.4)."""
+    def precheck(
+        self,
+        files: list[Path],
+        template: Template,
+        page_scope: SignPageScope = SignPageScope.ALL,
+        current_page_index: Optional[int] = None,
+    ) -> list[PrecheckResult]:
+        """Check each file has the page(s) `page_scope` requires, upfront (F3.4)."""
         results = []
         for file_path in files:
             try:
@@ -60,14 +66,11 @@ class BatchSignService:
                 results.append(PrecheckResult(file_path, None, str(exc)))
                 continue
 
-            missing = [
-                box.page_ref.describe()
-                for box in template.signature_boxes
-                if not box.page_ref.resolve_indices(info.page_count)
-            ]
+            indices = page_scope.resolve_indices(info.page_count, current_page_index)
             warning = (
-                f"Missing required page(s): {', '.join(missing)} (file has {info.page_count} page(s))"
-                if missing
+                f"Missing required page: {page_scope.describe()} "
+                f"(file has {info.page_count} page(s))"
+                if not indices and template.signature_boxes
                 else None
             )
             results.append(PrecheckResult(file_path, info.page_count, warning))
@@ -78,6 +81,8 @@ class BatchSignService:
         files: list[Path],
         template: Template,
         output_dir: Path,
+        page_scope: SignPageScope = SignPageScope.ALL,
+        current_page_index: Optional[int] = None,
         on_progress: Optional[ProgressCallback] = None,
         should_cancel: Optional[CancelCheck] = None,
     ) -> list[FileSignResult]:
@@ -88,13 +93,20 @@ class BatchSignService:
         for i, file_path in enumerate(files, start=1):
             if should_cancel is not None and should_cancel():
                 break
-            result = self._sign_one(file_path, template, output_dir)
+            result = self._sign_one(file_path, template, output_dir, page_scope, current_page_index)
             results.append(result)
             if on_progress is not None:
                 on_progress(i, total, result)
         return results
 
-    def _sign_one(self, file_path: Path, template: Template, output_dir: Path) -> FileSignResult:
+    def _sign_one(
+        self,
+        file_path: Path,
+        template: Template,
+        output_dir: Path,
+        page_scope: SignPageScope,
+        current_page_index: Optional[int],
+    ) -> FileSignResult:
         try:
             info = self._pdf_inspect.get_info(file_path)
         except PdfInspectError as exc:
@@ -102,7 +114,7 @@ class BatchSignService:
 
         output_path = output_dir / file_path.name
         try:
-            self._engine.sign_file(info, template, output_path)
+            self._engine.sign_file(info, template, output_path, page_scope, current_page_index)
         except SigningError as exc:
             return FileSignResult(file_path, status="failed", error_reason=str(exc))
 

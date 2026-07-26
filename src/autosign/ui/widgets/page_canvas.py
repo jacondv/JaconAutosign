@@ -34,18 +34,17 @@ class PageCanvas(QWidget):
         self._selected_id: str | None = None
         self._interactive = True
         self._backdrop = _DEFAULT_BACKDROP
+        self._mode: str = "idle"  # idle | draw | move | resize | pan
+        self._drag_anchor: QPointF = QPointF()
+        self._drag_orig_rect: QRectF = QRectF()
+        self._draw_rect: QRectF | None = None
+        self._pan_last_global: QPointF = QPointF()
 
     def set_backdrop_color(self, color: QColor) -> None:
         """The neutral area behind the rendered page - themed to match the
         app's light/dark skin so it doesn't stand out as a leftover default."""
         self._backdrop = color
         self.update()
-
-        self._mode: str = "idle"  # idle | draw | move | resize | pan
-        self._drag_anchor: QPointF = QPointF()
-        self._drag_orig_rect: QRectF = QRectF()
-        self._draw_rect: QRectF | None = None
-        self._pan_last_global: QPointF = QPointF()
 
     def set_interactive(self, interactive: bool) -> None:
         """When False, the canvas is a read-only viewer page: no box

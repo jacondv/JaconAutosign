@@ -21,7 +21,7 @@ from pyhanko.pdf_utils import images
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields, signers
 
-from ..models import Rect, SignatureBox, Template
+from ..models import Rect, SignatureBox, SignPageScope, Template
 from .appearance_compose import build_text_lines, compose_appearance_image
 from .certificate_provider import CertificateProvider
 
@@ -45,18 +45,30 @@ class SigningEngine:
         self._cert_provider = cert_provider
         self._signer_display_name = signer_display_name
 
-    def sign_file(self, pdf_info: PdfInfo, template: Template, output_path: Path) -> None:
+    def sign_file(
+        self,
+        pdf_info: PdfInfo,
+        template: Template,
+        output_path: Path,
+        page_scope: SignPageScope = SignPageScope.ALL,
+        current_page_index: int | None = None,
+    ) -> None:
         boxes = template.signature_boxes
         if not boxes:
             raise SigningError("Template has no signature boxes.")
 
-        self._validate_pages(pdf_info, boxes)
+        page_indices = page_scope.resolve_indices(pdf_info.page_count, current_page_index)
+        if not page_indices:
+            raise SigningError(
+                f"Missing page: '{page_scope.describe()}' does not resolve to a valid page "
+                f"in this file ({pdf_info.page_count} page(s))."
+            )
         sign_time = datetime.now()
 
         try:
             pdf_bytes = pdf_info.path.read_bytes()
             for box_num, box in enumerate(boxes, start=1):
-                for page_index in box.page_ref.resolve_indices(pdf_info.page_count):
+                for page_index in page_indices:
                     field_name = f"Sig{box_num}_p{page_index + 1}"
                     pdf_bytes = self._apply_one_field(
                         pdf_bytes, pdf_info, box, page_index, field_name, sign_time
@@ -68,14 +80,6 @@ class SigningEngine:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(pdf_bytes)
-
-    def _validate_pages(self, pdf_info: PdfInfo, boxes: list[SignatureBox]) -> None:
-        for box in boxes:
-            if not box.page_ref.resolve_indices(pdf_info.page_count):
-                raise SigningError(
-                    f"Missing page: template requires '{box.page_ref.describe()}' "
-                    f"but the file only has {pdf_info.page_count} page(s)."
-                )
 
     def _apply_one_field(
         self,
@@ -101,7 +105,13 @@ class SigningEngine:
             new_field_spec=field_spec,
         )
 
-        writer = IncrementalPdfFileWriter(io.BytesIO(pdf_bytes))
+        # strict=False: some PDFs (e.g. exported from Word or older Foxit/
+        # Acrobat versions) use hybrid cross-reference sections (both an
+        # xref table and an xref stream). pyHanko's default strict reader
+        # refuses to sign those ("hybrid cross-reference... while hybrid
+        # xrefs are disabled") even though they're a legal, common PDF
+        # structure - relax to non-strict so those files sign normally.
+        writer = IncrementalPdfFileWriter(io.BytesIO(pdf_bytes), strict=False)
         out_buffer = io.BytesIO()
         pdf_signer.sign_pdf(writer, output=out_buffer)
         return out_buffer.getvalue()

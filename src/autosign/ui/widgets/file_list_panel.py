@@ -63,16 +63,32 @@ class FileListPanel(QWidget):
         item = self._list.currentItem()
         return item.data(_ROLE_PATH) if item else None
 
-    def add_files(self, paths: Iterable[Path]) -> None:
+    def add_files(self, paths: Iterable[Path]) -> list[Path]:
+        """Returns the subset of `paths` that were actually newly added
+        (i.e. not already in the list), in order - callers use this to
+        auto-select/preview the first newly opened file."""
         existing = set(self._files)
-        added = False
+        added: list[Path] = []
         for path in paths:
             if path not in existing:
                 self._files.append(path)
                 existing.add(path)
-                added = True
+                added.append(path)
         if added:
             self.files_changed.emit()
+        return added
+
+    def select_path(self, path: Path | None) -> None:
+        """Programmatically select `path` in the list, the same as a user
+        click - fires selection_changed so the preview follows."""
+        if path is None:
+            self._list.setCurrentItem(None)
+            return
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if item.data(_ROLE_PATH) == path:
+                self._list.setCurrentItem(item)
+                return
 
     def remove_selected(self) -> None:
         selected = {item.data(_ROLE_PATH) for item in self._list.selectedItems()}
@@ -94,8 +110,10 @@ class FileListPanel(QWidget):
         """Rebuild the list widget from current files/statuses. `warnings`
         (e.g. precheck results) are only shown for files with no status yet."""
         warnings = warnings or {}
+        current_path = self.current_path
         self._list.blockSignals(True)
         self._list.clear()
+        current_item = None
         for path in self._files:
             status = self._statuses.get(path)
             warning = warnings.get(path)
@@ -116,6 +134,10 @@ class FileListPanel(QWidget):
             if color is not None:
                 item.setForeground(color)
             self._list.addItem(item)
+            if path == current_path:
+                current_item = item
+        if current_item is not None:
+            self._list.setCurrentItem(current_item)
         self._list.blockSignals(False)
 
     def _on_selection_changed(self, current: QListWidgetItem | None, _previous) -> None:

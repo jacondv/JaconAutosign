@@ -23,6 +23,8 @@ DEFAULT_SHORTCUT_OPEN_FILES = "Ctrl+O"
 DEFAULT_SHORTCUT_OPEN_FOLDER = "Ctrl+Shift+O"
 DEFAULT_SHORTCUT_SIGN = "Ctrl+S"
 
+DEFAULT_PAGE_SCOPE = "all"  # SignPageScope.ALL.value
+
 
 @dataclass
 class AppSettings:
@@ -37,6 +39,8 @@ class AppSettings:
     shortcut_open_files: str = DEFAULT_SHORTCUT_OPEN_FILES
     shortcut_open_folder: str = DEFAULT_SHORTCUT_OPEN_FOLDER
     shortcut_sign: str = DEFAULT_SHORTCUT_SIGN
+    last_file_scope_current_only: bool = False
+    last_page_scope: str = DEFAULT_PAGE_SCOPE
 
 
 class SettingsService:

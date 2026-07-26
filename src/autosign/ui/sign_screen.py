@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..models import SignPageScope
 from ..services import PdfInfo, PdfInspectService, SettingsService, TemplateService, get_signed_pages
 from ..services.batch_sign_service import BatchSignService
 from ..services.pdf_inspect_service import PdfInspectError
@@ -58,6 +59,7 @@ class SignScreen(QWidget):
     viewer_status_changed = Signal(ViewerStatus)
     panel_toggled = Signal(str)  # new "Hide Panel"/"Show Panel" button text
     sign_running_changed = Signal(bool)
+    current_file_changed = Signal(object)  # Path | None - for the window title
 
     def __init__(
         self,
@@ -82,6 +84,7 @@ class SignScreen(QWidget):
 
         self._build_ui()
         self.reload_templates()
+        self._restore_scope_preferences()
 
     # ------------------------------------------------------------------- UI
     def _build_ui(self) -> None:
@@ -115,6 +118,8 @@ class SignScreen(QWidget):
         self._control_panel.manage_templates_requested.connect(self.settings_requested.emit)
         self._control_panel.sign_requested.connect(self.start_signing)
         self._control_panel.cancel_requested.connect(self._cancel_signing)
+        self._control_panel.file_scope_changed.connect(self._on_file_scope_changed)
+        self._control_panel.page_scope_changed.connect(self._on_page_scope_changed)
         layout.addWidget(self._control_panel)
 
         self._right_panel = panel
@@ -187,22 +192,28 @@ class SignScreen(QWidget):
     # -------------------------------------------------------------- files
     def open_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Open PDF files", "", "PDF (*.pdf)")
-        self._file_panel.add_files(Path(p) for p in paths)
+        added = self._file_panel.add_files(Path(p) for p in paths)
+        if added:
+            self._file_panel.select_path(added[0])
 
     def open_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Open folder")
         if folder:
-            self._file_panel.add_files(sorted(Path(folder).glob("*.pdf")))
+            added = self._file_panel.add_files(sorted(Path(folder).glob("*.pdf")))
+            if added:
+                self._file_panel.select_path(added[0])
 
     def _refresh_file_list(self) -> None:
         template = self._current_template()
         warnings = {}
         if template:
-            warnings = {
-                r.file_path: r.warning
-                for r in BatchSignService(self._pdf_inspect).precheck(self._file_panel.files, template)
-                if r.warning
-            }
+            precheck = BatchSignService(self._pdf_inspect).precheck(
+                self._file_panel.files,
+                template,
+                self._control_panel.current_page_scope(),
+                self._viewer.current_page() if self._current_file else None,
+            )
+            warnings = {r.file_path: r.warning for r in precheck if r.warning}
         self._file_panel.refresh(warnings)
         if self._current_file is not None and self._current_file not in self._file_panel.files:
             self._current_file = None
@@ -210,6 +221,7 @@ class SignScreen(QWidget):
             self._current_signed_pages = set()
             self._viewer.clear()
             self._on_viewer_state_changed()
+            self.current_file_changed.emit(None)
 
     # ----------------------------------------------------------- preview
     def _on_file_selection_changed(self, path: Path | None) -> None:
@@ -228,6 +240,7 @@ class SignScreen(QWidget):
         self._current_signed_pages = get_signed_pages(path)
         self._viewer.load(str(path), info.page_sizes)
         self._on_viewer_state_changed()
+        self.current_file_changed.emit(path)
 
     def _sync_preview_overlay(self) -> None:
         template = self._current_template()
@@ -267,6 +280,27 @@ class SignScreen(QWidget):
             self._settings_service.save(settings)
         self._refresh_file_list()
         self._sync_preview_overlay()
+
+    # ------------------------------------------------------------- scope prefs
+    def _restore_scope_preferences(self) -> None:
+        settings = self._settings_service.load()
+        self._control_panel.set_file_scope(settings.last_file_scope_current_only)
+        try:
+            scope = SignPageScope(settings.last_page_scope)
+        except ValueError:
+            scope = SignPageScope.ALL
+        self._control_panel.set_page_scope(scope)
+
+    def _on_file_scope_changed(self, current_only: bool) -> None:
+        settings = self._settings_service.load()
+        settings.last_file_scope_current_only = current_only
+        self._settings_service.save(settings)
+
+    def _on_page_scope_changed(self, scope_value: str) -> None:
+        settings = self._settings_service.load()
+        settings.last_page_scope = scope_value
+        self._settings_service.save(settings)
+        self._refresh_file_list()
 
     # ------------------------------------------------------------ cert status
     def refresh_cert_status(self) -> None:
@@ -333,8 +367,12 @@ class SignScreen(QWidget):
         engine = SigningEngine(cert_provider, signer_display_name=settings.signer_name or "")
         service = BatchSignService(self._pdf_inspect, engine)
         output_dir = self._settings_service.resolve_output_dir(settings, files_to_sign[0])
+        page_scope = self._control_panel.current_page_scope()
+        current_page_index = self._viewer.current_page() if self._current_file else None
 
-        self._worker = BatchSignWorker(service, files_to_sign, template, output_dir)
+        self._worker = BatchSignWorker(
+            service, files_to_sign, template, output_dir, page_scope, current_page_index
+        )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished_all.connect(self._on_finished)
         self._control_panel.start_progress(len(files_to_sign))

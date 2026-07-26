@@ -247,7 +247,7 @@ class TemplateDesignerScreen(QWidget):
         self._box_list.clear()
         for box_id in self._box_order:
             box = self._boxes[box_id]
-            item = QListWidgetItem(f"{box.label} - {box.page_ref.describe()}")
+            item = QListWidgetItem(box.label)
             item.setData(1000, box_id)
             self._box_list.addItem(item)
 
@@ -255,12 +255,6 @@ class TemplateDesignerScreen(QWidget):
         item = self._box_list.currentItem()
         box_id = item.data(1000) if item else None
         self._canvas.select_box(box_id)
-        if box_id and self._pdf_info:
-            indices = self._boxes[box_id].page_ref.resolve_indices(self._pdf_info.page_count)
-            if indices and self._current_page not in indices:
-                self._current_page = indices[0]
-                self._render_current_page()
-                self._canvas.select_box(box_id)
 
     def _edit_selected_box(self) -> None:
         item = self._box_list.currentItem()
@@ -270,9 +264,8 @@ class TemplateDesignerScreen(QWidget):
         box = self._boxes[box_id]
         dialog = BoxEditDialog(
             page_count=self._pdf_info.page_count,
-            current_page_number=(box.page_ref.page_number or self._current_page + 1),
+            current_page_number=self._current_page + 1,
             label=box.label,
-            page_ref=box.page_ref,
             appearance=box.appearance,
             parent=self,
         )

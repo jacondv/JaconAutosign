@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
-from ..models import Template
+from ..models import SignPageScope, Template
 from ..services.batch_sign_service import BatchSignService
 
 
@@ -19,6 +19,8 @@ class BatchSignWorker(QThread):
         files: list[Path],
         template: Template,
         output_dir: Path,
+        page_scope: SignPageScope = SignPageScope.ALL,
+        current_page_index: int | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -26,6 +28,8 @@ class BatchSignWorker(QThread):
         self._files = files
         self._template = template
         self._output_dir = output_dir
+        self._page_scope = page_scope
+        self._current_page_index = current_page_index
         self._cancel_requested = False
 
     def request_cancel(self) -> None:
@@ -36,6 +40,8 @@ class BatchSignWorker(QThread):
             self._files,
             self._template,
             self._output_dir,
+            page_scope=self._page_scope,
+            current_page_index=self._current_page_index,
             on_progress=lambda done, total, result: self.progress.emit(done, total, result),
             should_cancel=lambda: self._cancel_requested,
         )

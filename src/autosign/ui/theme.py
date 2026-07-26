@@ -163,10 +163,38 @@ QPushButton#primaryButton:disabled {{
     border-color: {p.border};
     color: {p.text_disabled};
 }}
+QLabel {{
+    color: {p.text};
+    background: transparent;
+}}
 QRadioButton, QCheckBox {{
     color: {p.text};
     spacing: 6px;
     background: transparent;
+}}
+QRadioButton::indicator, QCheckBox::indicator {{
+    width: 13px;
+    height: 13px;
+    border: 1px solid {p.text_muted};
+    background: {p.bg_input};
+}}
+QRadioButton::indicator {{
+    border-radius: 7px;
+}}
+QCheckBox::indicator {{
+    border-radius: 3px;
+}}
+QRadioButton::indicator:hover, QCheckBox::indicator:hover {{
+    border: 1px solid {p.accent};
+}}
+QRadioButton::indicator:checked {{
+    border: 1px solid {p.accent};
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 {p.accent}, stop:0.45 {p.accent}, stop:0.55 {p.bg_input}, stop:1 {p.bg_input});
+}}
+QCheckBox::indicator:checked {{
+    border: 1px solid {p.accent};
+    background: {p.accent};
 }}
 QProgressBar {{
     background: {p.bg_input};
