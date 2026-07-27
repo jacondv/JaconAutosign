@@ -46,6 +46,7 @@ class AppSettings:
     last_page_scope: str = DEFAULT_PAGE_SCOPE
     last_open_dir: Optional[str] = None
     wheel_page_turn_enabled: bool = False
+    signature_font_size: int = 0  # 0 = auto (shrink-to-fit), else fixed pt size
 
 
 class SettingsService:

@@ -42,9 +42,15 @@ class SigningError(Exception):
 
 
 class SigningEngine:
-    def __init__(self, cert_provider: CertificateProvider, signer_display_name: str = ""):
+    def __init__(
+        self,
+        cert_provider: CertificateProvider,
+        signer_display_name: str = "",
+        font_size_pt: int | None = None,
+    ):
         self._cert_provider = cert_provider
         self._signer_display_name = signer_display_name
+        self._font_size_pt = font_size_pt
 
     def sign_file(
         self,
@@ -144,7 +150,7 @@ class SigningEngine:
     ) -> stamp.BaseStampStyle:
         text_lines = build_text_lines(box.appearance, self._signer_display_name, sign_time)
         composed = compose_appearance_image(
-            box.appearance.image_path, text_lines, rect.width, rect.height
+            box.appearance.image_path, text_lines, rect.width, rect.height, self._font_size_pt
         )
         return stamp.StaticStampStyle(
             background=images.PdfImage(composed), border_width=0, background_opacity=1.0

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QRadioButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -185,6 +186,19 @@ class SettingsScreen(QWidget):
         appearance_group = QGroupBox("Appearance")
         appearance_group.setLayout(appearance_layout)
 
+        self._font_size_spin = QSpinBox()
+        self._font_size_spin.setRange(0, 72)
+        self._font_size_spin.setSpecialValueText("Auto")
+        self._font_size_spin.setToolTip(
+            "Font size (pt) for the \"Digitally signed by / Date\" text next to the\n"
+            "signature image. 0 = auto (shrinks to fit the signature box)."
+        )
+        self._font_size_spin.valueChanged.connect(self._refresh_preview)
+        signature_text_form = QFormLayout()
+        signature_text_form.addRow("Font size:", self._font_size_spin)
+        signature_text_group = QGroupBox("Signature text")
+        signature_text_group.setLayout(signature_text_form)
+
         self._shortcut_open_files_edit = QKeySequenceEdit()
         self._shortcut_open_folder_edit = QKeySequenceEdit()
         self._shortcut_sign_edit = QKeySequenceEdit()
@@ -197,6 +211,7 @@ class SettingsScreen(QWidget):
 
         column = QVBoxLayout()
         column.addWidget(appearance_group)
+        column.addWidget(signature_text_group)
         column.addWidget(shortcuts_group)
         column.addStretch(1)
         return column
@@ -223,6 +238,10 @@ class SettingsScreen(QWidget):
         self._light_radio.blockSignals(True)
         (self._dark_radio if s.theme_mode == THEME_DARK else self._light_radio).setChecked(True)
         self._light_radio.blockSignals(False)
+
+        self._font_size_spin.blockSignals(True)
+        self._font_size_spin.setValue(s.signature_font_size)
+        self._font_size_spin.blockSignals(False)
 
         self._shortcut_open_files_edit.setKeySequence(QKeySequence(s.shortcut_open_files))
         self._shortcut_open_folder_edit.setKeySequence(QKeySequence(s.shortcut_open_folder))
@@ -278,6 +297,7 @@ class SettingsScreen(QWidget):
         else:
             self._settings_service.clear_remembered_password(self._settings)
         self._settings.theme_mode = THEME_DARK if self._dark_radio.isChecked() else THEME_LIGHT
+        self._settings.signature_font_size = self._font_size_spin.value()
         self._settings.shortcut_open_files = self._shortcut_open_files_edit.keySequence().toString()
         self._settings.shortcut_open_folder = self._shortcut_open_folder_edit.keySequence().toString()
         self._settings.shortcut_sign = self._shortcut_sign_edit.keySequence().toString()
@@ -350,7 +370,9 @@ class SettingsScreen(QWidget):
             self._preview_label.setText("Select a template to preview its signature.")
             return
         template = self._templates.load(template_id)
-        pixmap = render_template_preview(template, self._signer_name_edit.text().strip())
+        pixmap = render_template_preview(
+            template, self._signer_name_edit.text().strip(), self._font_size_spin.value() or None
+        )
         if pixmap is None:
             self._preview_label.setPixmap(QPixmap())
             self._preview_label.setText("This template has no signature boxes yet.")

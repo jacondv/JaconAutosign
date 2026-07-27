@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 _PX_PER_POINT = 4  # composed-image resolution; higher = sharper when the PDF is zoomed
 _LEFT_RATIO = 0.42
 _PADDING = 6
-_DIVIDER_COLOR = (140, 140, 140, 200)
 _TEXT_COLOR = (20, 20, 20, 255)
 _MIN_FONT_SIZE = 7
 
@@ -35,7 +34,7 @@ def build_text_lines(
     """The text lines shown next to the signature image - shared by the real
     signing pipeline (signing_engine.py) and the Settings template preview,
     so the preview always matches what actually gets signed."""
-    date_str = sign_time.strftime("%d/%m/%Y %H:%M")
+    date_str = _format_signing_date(sign_time)
     if appearance.show_text and appearance.text_template:
         rendered = appearance.text_template.replace(
             "{{signer_name}}", signer_display_name or ""
@@ -44,9 +43,16 @@ def build_text_lines(
 
     lines = []
     if signer_display_name:
-        lines.append(f"Signed by: {signer_display_name}")
+        lines.append(f"Digitally signed by {signer_display_name}")
     lines.append(f"Date: {date_str}")
     return lines
+
+
+def _format_signing_date(sign_time: datetime) -> str:
+    """Adobe-style timestamp, e.g. "2026.07.27 09:40:08 +07'00'"."""
+    offset = sign_time.strftime("%z") or "+0000"
+    offset = f"{offset[:3]}'{offset[3:]}'"
+    return sign_time.strftime("%Y.%m.%d %H:%M:%S ") + offset
 
 
 def _wrap_line(line: str, font: ImageFont.ImageFont, max_width: float, draw: ImageDraw.ImageDraw) -> list[str]:
@@ -71,6 +77,7 @@ def compose_appearance_image(
     text_lines: list[str],
     box_width_pt: float,
     box_height_pt: float,
+    font_size_pt: int | None = None,
 ) -> Image.Image:
     width = max(int(box_width_pt * _PX_PER_POINT), 120)
     height = max(int(box_height_pt * _PX_PER_POINT), 60)
@@ -88,34 +95,37 @@ def compose_appearance_image(
         y = (height - signature.height) // 2
         canvas.paste(signature, (x, y), signature)
 
-    if has_image and text_lines:
-        draw = ImageDraw.Draw(canvas)
-        draw.line(
-            (left_width, _PADDING, left_width, height - _PADDING),
-            fill=_DIVIDER_COLOR,
-            width=max(1, _PX_PER_POINT // 3),
-        )
-
     if text_lines:
         draw = ImageDraw.Draw(canvas)
         text_x = (left_width + _PADDING) if has_image else _PADDING
         available_w = max(width - text_x - _PADDING, 10)
         available_h = height - 2 * _PADDING
 
-        font_size = max(9, min(int(height * 0.16), available_h // max(len(text_lines), 1) - 2))
-        # Word-wrap at the current font size, then shrink and re-wrap until
-        # the wrapped lines fit the box height (or we hit the size floor) -
-        # a box too narrow for "Signed by: ..." wraps instead of overflowing.
-        while True:
+        if font_size_pt:
+            # User picked a fixed size (in pt, same unit as the box) -
+            # honor it as-is, no shrink-to-fit.
+            font_size = max(_MIN_FONT_SIZE, font_size_pt * _PX_PER_POINT)
             font = _load_font(font_size)
             wrapped_lines = [
                 wrapped for line in text_lines for wrapped in _wrap_line(line, font, available_w, draw)
             ]
             line_height = font_size + 4
             total_h = line_height * len(wrapped_lines)
-            if total_h <= available_h or font_size <= _MIN_FONT_SIZE:
-                break
-            font_size -= 1
+        else:
+            font_size = max(9, min(int(height * 0.16), available_h // max(len(text_lines), 1) - 2))
+            # Word-wrap at the current font size, then shrink and re-wrap until
+            # the wrapped lines fit the box height (or we hit the size floor) -
+            # a box too narrow for "Signed by: ..." wraps instead of overflowing.
+            while True:
+                font = _load_font(font_size)
+                wrapped_lines = [
+                    wrapped for line in text_lines for wrapped in _wrap_line(line, font, available_w, draw)
+                ]
+                line_height = font_size + 4
+                total_h = line_height * len(wrapped_lines)
+                if total_h <= available_h or font_size <= _MIN_FONT_SIZE:
+                    break
+                font_size -= 1
 
         y = max(_PADDING, (height - total_h) // 2)
         for line in wrapped_lines:

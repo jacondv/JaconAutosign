@@ -414,7 +414,11 @@ class SignScreen(QWidget):
             )
             return
 
-        engine = SigningEngine(cert_provider, signer_display_name=settings.signer_name or "")
+        engine = SigningEngine(
+            cert_provider,
+            signer_display_name=settings.signer_name or "",
+            font_size_pt=settings.signature_font_size or None,
+        )
         service = BatchSignService(self._pdf_inspect, engine)
         output_dir = self._settings_service.resolve_output_dir(settings, files_to_sign[0])
         page_scope = self._control_panel.current_page_scope()
