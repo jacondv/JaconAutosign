@@ -39,10 +39,10 @@ if (-not (Test-Path $exePath)) {
 New-Item -Path $regKey -Force | Out-Null
 Set-ItemProperty -Path $regKey -Name "(Default)" -Value "Open with AutoSign"
 Set-ItemProperty -Path $regKey -Name "Icon" -Value "`"$exePath`""
-# "Document" invokes the command once with every selected file passed as
-# "%1" (Explorer expands it to all quoted paths, space-separated) instead
-# of the default "Player" model, which would launch AutoSign once per file.
-Set-ItemProperty -Path $regKey -Name "MultiSelectModel" -Value "Document"
+# Windows invokes the command once per selected file regardless of
+# MultiSelectModel (unreliable for per-extension verbs on Windows 10/11) -
+# AutoSign itself hands off each extra launch to the first window instead
+# of opening one per file (see main.py's single-instance local socket).
 
 $commandKey = Join-Path $regKey "command"
 New-Item -Path $commandKey -Force | Out-Null

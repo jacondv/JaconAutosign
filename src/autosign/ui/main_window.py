@@ -100,6 +100,18 @@ class MainWindow(QMainWindow):
             return
         self._autoload_from_clipboard()
 
+    def open_startup_paths(self, paths: list[Path]) -> None:
+        """Called (via main.py's single-instance local-socket server) when
+        a later AutoSign launch - e.g. Explorer invoking us again for
+        another file in the same multi-select - hands off its files here
+        instead of opening a second window."""
+        if paths:
+            self._sign_screen.open_from_startup_paths(paths)
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
     def _autoload_from_clipboard(self) -> None:
         """If the user copied a path (e.g. "Copy as path" in Explorer)
         before opening the app, feed it to SignScreen.open_from_startup_path
