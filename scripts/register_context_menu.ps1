@@ -2,11 +2,14 @@
 # Windows Explorer. Chi ghi vao HKEY_CURRENT_USER nen khong can quyen Admin,
 # va chi anh huong toi user hien tai.
 #
-# Cach dung (sau khi da build bang scripts\build.ps1):
-#   .\scripts\register_context_menu.ps1
+# AutoSign.exe phai nam CUNG THU MUC voi script nay (vd: copy script vao
+# dist\AutoSign\ sau khi build, hoac vao thu muc da cai dat AutoSign).
+#
+# Cach dung:
+#   .\register_context_menu.ps1
 #
 # De go bo:
-#   .\scripts\register_context_menu.ps1 -Unregister
+#   .\register_context_menu.ps1 -Unregister
 
 param(
     [switch]$Unregister
@@ -14,8 +17,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Split-Path -Parent $PSScriptRoot
-$exePath = Join-Path $repoRoot "dist\AutoSign\AutoSign.exe"
+$exePath = Join-Path $PSScriptRoot "AutoSign.exe"
 $regKey = "HKCU:\Software\Classes\SystemFileAssociations\.pdf\shell\AutoSign"
 
 if ($Unregister) {
@@ -29,7 +31,9 @@ if ($Unregister) {
 }
 
 if (-not (Test-Path $exePath)) {
-    throw "Khong tim thay $exePath - hay chay scripts\build.ps1 truoc."
+    Write-Host "Khong tim thay AutoSign.exe cung thu muc voi script nay ($exePath)."
+    Write-Host "Hay dat script nay vao thu muc chua AutoSign.exe roi chay lai."
+    return
 }
 
 New-Item -Path $regKey -Force | Out-Null

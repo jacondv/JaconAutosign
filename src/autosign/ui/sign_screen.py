@@ -226,13 +226,10 @@ class SignScreen(QWidget):
         self.open_files()
 
     def open_from_startup_paths(self, paths: list[Path]) -> None:
-        """Explorer "Open with AutoSign" on a multi-file selection: every
-        selected PDF is added to the list, and the first one is selected
-        (opened in the viewer) - same single-file rule as
-        open_from_startup_path when only one path comes in."""
-        if len(paths) <= 1:
-            self.open_from_startup_path(paths[0] if paths else None)
-            return
+        """Explorer "Open with AutoSign", one or several files selected at
+        once: just add them to the list, exactly like picking the same
+        files in the Open Files dialog (which already selects the first
+        one added)."""
         pdfs = []
         for path in paths:
             try:
@@ -241,7 +238,6 @@ class SignScreen(QWidget):
             except OSError:
                 continue
         if not pdfs:
-            self.open_files()
             return
         self._remember_open_dir(pdfs[0].parent)
         self._add_and_select(pdfs)
