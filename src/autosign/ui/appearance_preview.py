@@ -21,7 +21,7 @@ def render_template_preview(
     if not template.signature_boxes:
         return None
     box = template.signature_boxes[0]
-    text_lines = build_text_lines(box.appearance, signer_name, datetime.now())
+    text_lines = build_text_lines(box.appearance, signer_name, datetime.now().astimezone())
     image = compose_appearance_image(
         box.appearance.image_path, text_lines, box.rect.width, box.rect.height, font_size_pt
     )

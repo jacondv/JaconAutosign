@@ -78,7 +78,7 @@ class SigningEngine:
 
         already_signed = get_signed_pages(pdf_info.path)
         pages_to_sign = [i for i in page_indices if i not in already_signed]
-        sign_time = datetime.now()
+        sign_time = datetime.now().astimezone()
 
         try:
             pdf_bytes = pdf_info.path.read_bytes()
