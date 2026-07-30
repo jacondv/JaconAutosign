@@ -35,11 +35,13 @@ if (-not (Test-Path $exePath)) {
 New-Item -Path $regKey -Force | Out-Null
 Set-ItemProperty -Path $regKey -Name "(Default)" -Value "Open with AutoSign"
 Set-ItemProperty -Path $regKey -Name "Icon" -Value "`"$exePath`""
+# "Document" invokes the command once with every selected file passed as
+# "%1" (Explorer expands it to all quoted paths, space-separated) instead
+# of the default "Player" model, which would launch AutoSign once per file.
+Set-ItemProperty -Path $regKey -Name "MultiSelectModel" -Value "Document"
 
 $commandKey = Join-Path $regKey "command"
 New-Item -Path $commandKey -Force | Out-Null
-# Explorer luon chi truyen dung 1 file cho "%1" du chon nhieu file cung luc
-# - khop voi yeu cau "mo luon file dau tien".
 Set-ItemProperty -Path $commandKey -Name "(Default)" -Value "`"$exePath`" `"%1`""
 
 Write-Host "Da them muc 'Open with AutoSign' vao menu chuot phai cua file .pdf."

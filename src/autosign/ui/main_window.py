@@ -27,13 +27,15 @@ from .widgets import RibbonBar
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, initial_theme: str = theme.THEME_LIGHT, startup_path: Path | None = None):
+    def __init__(
+        self, initial_theme: str = theme.THEME_LIGHT, startup_paths: list[Path] | None = None
+    ):
         super().__init__()
         self._base_title = "AutoSign - Batch PDF Signing"
         self.setWindowTitle(self._base_title)
         self.resize(1400, 860)
         self._shortcuts: list[QShortcut] = []
-        self._startup_path = startup_path
+        self._startup_paths = startup_paths or []
 
         self._template_service = TemplateService(templates_dir())
         self._pdf_inspect = PdfInspectService()
@@ -90,11 +92,11 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._autoload_from_startup)
 
     def _autoload_from_startup(self) -> None:
-        """Prefer a file handed in on the command line (Explorer's "Open
+        """Prefer file(s) handed in on the command line (Explorer's "Open
         with AutoSign") over the clipboard-path fallback below - both feed
-        into the same SignScreen.open_from_startup_path rule."""
-        if self._startup_path is not None:
-            self._sign_screen.open_from_startup_path(self._startup_path)
+        into the same SignScreen open_from_startup_path(s) rule."""
+        if self._startup_paths:
+            self._sign_screen.open_from_startup_paths(self._startup_paths)
             return
         self._autoload_from_clipboard()
 
