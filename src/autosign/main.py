@@ -28,7 +28,12 @@ def main() -> int:
     initial_settings = SettingsService(settings_file()).load()
     app.setStyleSheet(theme.stylesheet(initial_settings.theme_mode))
 
-    window = MainWindow(initial_theme=initial_settings.theme_mode)
+    # Windows Explorer's "Open with AutoSign" passes the clicked file as the
+    # first argument (only one path even if several files were selected, so
+    # the first is what gets opened - see register_context_menu.ps1).
+    startup_path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
+
+    window = MainWindow(initial_theme=initial_settings.theme_mode, startup_path=startup_path)
     window.showMaximized()
     return app.exec()
 
