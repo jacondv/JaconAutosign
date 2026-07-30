@@ -1,6 +1,8 @@
 """Settings tab: default signing certificate, signer name, output folder, and
 signature template management (create/edit/duplicate/delete) - laid out as
-columns (certificate, output, templates) so everything is visible at once.
+two groups: general settings on the left, and a single "Signature templates"
+panel on the right where the template list, its live preview, and the font
+size that affects that preview all sit next to each other.
 """
 from __future__ import annotations
 
@@ -67,12 +69,25 @@ class SettingsScreen(QWidget):
     # ------------------------------------------------------------------- UI
     def _build_ui(self) -> None:
         root = QHBoxLayout(self)
-        root.addLayout(self._build_certificate_column(), 1)
-        root.addLayout(self._build_output_column(), 1)
-        root.addLayout(self._build_templates_column(), 1)
-        root.addLayout(self._build_preferences_column(), 1)
+        root.addLayout(self._build_general_column(), 2)
+        root.addWidget(self._build_templates_panel(), 3)
 
-    def _build_certificate_column(self) -> QVBoxLayout:
+    def _build_general_column(self) -> QVBoxLayout:
+        column = QVBoxLayout()
+        column.addWidget(self._build_certificate_group())
+        column.addWidget(self._build_output_group())
+        column.addWidget(self._build_appearance_group())
+        column.addWidget(self._build_shortcuts_group())
+
+        save_btn = QPushButton("Save settings")
+        save_btn.setObjectName("primaryButton")
+        save_btn.setMinimumHeight(36)
+        save_btn.clicked.connect(self._save_settings)
+        column.addWidget(save_btn)
+        column.addStretch(1)
+        return column
+
+    def _build_certificate_group(self) -> QGroupBox:
         self._pfx_path_edit = QLineEdit()
         browse_pfx_btn = QPushButton("Browse...")
         browse_pfx_btn.clicked.connect(self._browse_pfx)
@@ -103,19 +118,9 @@ class SettingsScreen(QWidget):
         cert_form.addRow("", test_btn)
         cert_group = QGroupBox("Signing certificate")
         cert_group.setLayout(cert_form)
+        return cert_group
 
-        save_btn = QPushButton("Save settings")
-        save_btn.setObjectName("primaryButton")
-        save_btn.setMinimumHeight(36)
-        save_btn.clicked.connect(self._save_settings)
-
-        column = QVBoxLayout()
-        column.addWidget(cert_group)
-        column.addWidget(save_btn)
-        column.addStretch(1)
-        return column
-
-    def _build_output_column(self) -> QVBoxLayout:
+    def _build_output_group(self) -> QGroupBox:
         self._subfolder_radio = QRadioButton("Subfolder named \"Signed_<signer name>\" next to the source file")
         self._subfolder_radio.setToolTip(
             "e.g. signing a file in Downloads writes to Downloads/Signed_<your name>/.\n"
@@ -135,26 +140,18 @@ class SettingsScreen(QWidget):
         output_layout.addLayout(custom_row)
         output_group = QGroupBox("Output folder")
         output_group.setLayout(output_layout)
+        return output_group
 
-        preview_group = QGroupBox("Signature preview")
-        preview_layout = QVBoxLayout(preview_group)
-        self._preview_label = QLabel("Select a template to preview its signature.")
-        self._preview_label.setWordWrap(True)
-        self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._preview_label.setMinimumHeight(120)
-        preview_layout.addWidget(self._preview_label)
-
-        column = QVBoxLayout()
-        column.addWidget(output_group)
-        column.addWidget(preview_group, 1)
-        return column
-
-    def _build_templates_column(self) -> QVBoxLayout:
+    def _build_templates_panel(self) -> QGroupBox:
+        """The list of templates, its live preview, and the font size that
+        affects that preview, all in one panel so picking/editing a template
+        and seeing the result stay next to each other regardless of how many
+        templates exist."""
         self._template_list = QListWidget()
         self._template_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._template_list.itemDoubleClicked.connect(self._edit_selected_template)
         self._template_list.currentItemChanged.connect(self._refresh_preview)
-        new_tpl_btn = QPushButton("New template")
+        new_tpl_btn = QPushButton("New")
         new_tpl_btn.clicked.connect(self.create_template_requested.emit)
         edit_tpl_btn = QPushButton("Edit")
         edit_tpl_btn.clicked.connect(self._edit_selected_template)
@@ -166,25 +163,17 @@ class SettingsScreen(QWidget):
         for btn in (new_tpl_btn, edit_tpl_btn, dup_tpl_btn, del_tpl_btn):
             tpl_buttons.addWidget(btn)
 
-        tpl_layout = QVBoxLayout()
-        tpl_layout.addWidget(self._template_list, 1)
-        tpl_layout.addLayout(tpl_buttons)
-        tpl_group = QGroupBox("Signature templates")
-        tpl_group.setLayout(tpl_layout)
+        list_layout = QVBoxLayout()
+        list_layout.addWidget(QLabel("Templates:"))
+        list_layout.addWidget(self._template_list, 1)
+        list_layout.addLayout(tpl_buttons)
 
-        column = QVBoxLayout()
-        column.addWidget(tpl_group, 1)
-        return column
-
-    def _build_preferences_column(self) -> QVBoxLayout:
-        self._light_radio = QRadioButton("Light")
-        self._dark_radio = QRadioButton("Dark")
-        self._light_radio.toggled.connect(self._on_theme_toggled)
-        appearance_layout = QVBoxLayout()
-        appearance_layout.addWidget(self._light_radio)
-        appearance_layout.addWidget(self._dark_radio)
-        appearance_group = QGroupBox("Appearance")
-        appearance_group.setLayout(appearance_layout)
+        self._preview_label = QLabel("Select a template to preview its signature.")
+        self._preview_label.setWordWrap(True)
+        self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preview_label.setMinimumHeight(160)
+        self._preview_label.setObjectName("templatePreview")
+        self._preview_label.setFrameShape(QLabel.Shape.StyledPanel)
 
         self._font_size_spin = QSpinBox()
         self._font_size_spin.setRange(0, 72)
@@ -194,11 +183,34 @@ class SettingsScreen(QWidget):
             "signature image. 0 = auto (shrinks to fit the signature box)."
         )
         self._font_size_spin.valueChanged.connect(self._refresh_preview)
-        signature_text_form = QFormLayout()
-        signature_text_form.addRow("Font size:", self._font_size_spin)
-        signature_text_group = QGroupBox("Signature text")
-        signature_text_group.setLayout(signature_text_form)
+        font_row = QFormLayout()
+        font_row.addRow("Signature text font size:", self._font_size_spin)
 
+        preview_layout = QVBoxLayout()
+        preview_layout.addWidget(QLabel("Preview (selected template):"))
+        preview_layout.addWidget(self._preview_label, 1)
+        preview_layout.addLayout(font_row)
+
+        content = QHBoxLayout()
+        content.addLayout(list_layout, 1)
+        content.addLayout(preview_layout, 1)
+
+        panel = QGroupBox("Signature templates")
+        panel.setLayout(content)
+        return panel
+
+    def _build_appearance_group(self) -> QGroupBox:
+        self._light_radio = QRadioButton("Light")
+        self._dark_radio = QRadioButton("Dark")
+        self._light_radio.toggled.connect(self._on_theme_toggled)
+        appearance_layout = QVBoxLayout()
+        appearance_layout.addWidget(self._light_radio)
+        appearance_layout.addWidget(self._dark_radio)
+        appearance_group = QGroupBox("Appearance")
+        appearance_group.setLayout(appearance_layout)
+        return appearance_group
+
+    def _build_shortcuts_group(self) -> QGroupBox:
         self._shortcut_open_files_edit = QKeySequenceEdit()
         self._shortcut_open_folder_edit = QKeySequenceEdit()
         self._shortcut_sign_edit = QKeySequenceEdit()
@@ -208,13 +220,7 @@ class SettingsScreen(QWidget):
         shortcuts_form.addRow("Sign:", self._shortcut_sign_edit)
         shortcuts_group = QGroupBox("Keyboard Shortcuts")
         shortcuts_group.setLayout(shortcuts_form)
-
-        column = QVBoxLayout()
-        column.addWidget(appearance_group)
-        column.addWidget(signature_text_group)
-        column.addWidget(shortcuts_group)
-        column.addStretch(1)
-        return column
+        return shortcuts_group
 
     def _load_fields_from_settings(self) -> None:
         s = self._settings
