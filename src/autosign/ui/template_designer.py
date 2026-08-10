@@ -205,9 +205,12 @@ class TemplateDesignerScreen(QWidget):
         if not self._pdf_info:
             return
         page_size = self._pdf_info.page_size(self._current_page)
+        rect = _pixel_rect_to_pdf(pixel_rect, page_size, DEFAULT_PREVIEW_DPI)
         dialog = BoxEditDialog(
             page_count=self._pdf_info.page_count,
             current_page_number=self._current_page + 1,
+            box_width_pt=rect.width,
+            box_height_pt=rect.height,
             parent=self,
         )
         if dialog.exec() != BoxEditDialog.DialogCode.Accepted:
@@ -218,7 +221,7 @@ class TemplateDesignerScreen(QWidget):
             box_id=box_id,
             label=dialog.result_label(),
             page_ref=dialog.result_page_ref(),
-            rect=_pixel_rect_to_pdf(pixel_rect, page_size, DEFAULT_PREVIEW_DPI),
+            rect=rect,
             page_size_at_design_time=page_size,
             appearance=dialog.result_appearance(),
         )
@@ -267,6 +270,8 @@ class TemplateDesignerScreen(QWidget):
         dialog = BoxEditDialog(
             page_count=self._pdf_info.page_count,
             current_page_number=self._current_page + 1,
+            box_width_pt=box.rect.width,
+            box_height_pt=box.rect.height,
             label=box.label,
             appearance=box.appearance,
             parent=self,

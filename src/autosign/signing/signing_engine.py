@@ -150,7 +150,12 @@ class SigningEngine:
     ) -> stamp.BaseStampStyle:
         text_lines = build_text_lines(box.appearance, self._signer_display_name, sign_time)
         composed = compose_appearance_image(
-            box.appearance.image_path, text_lines, rect.width, rect.height, self._font_size_pt
+            box.appearance.image_path,
+            text_lines,
+            rect.width,
+            rect.height,
+            self._font_size_pt,
+            box.appearance.image_scale,
         )
         return stamp.StaticStampStyle(
             background=images.PdfImage(composed), border_width=0, background_opacity=1.0

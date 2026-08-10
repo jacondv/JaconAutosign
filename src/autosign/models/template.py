@@ -73,12 +73,14 @@ class Appearance:
     image_path: Optional[str] = None
     show_text: bool = False
     text_template: Optional[str] = None
+    image_scale: float = 1.0
 
     def to_dict(self) -> dict:
         return {
             "image_path": self.image_path,
             "show_text": self.show_text,
             "text_template": self.text_template,
+            "image_scale": self.image_scale,
         }
 
     @staticmethod
@@ -87,6 +89,7 @@ class Appearance:
             image_path=data.get("image_path"),
             show_text=data.get("show_text", False),
             text_template=data.get("text_template"),
+            image_scale=data.get("image_scale", 1.0),
         )
 
 

@@ -78,6 +78,7 @@ def compose_appearance_image(
     box_width_pt: float,
     box_height_pt: float,
     font_size_pt: int | None = None,
+    image_scale: float = 1.0,
 ) -> Image.Image:
     width = max(int(box_width_pt * _PX_PER_POINT), 120)
     height = max(int(box_height_pt * _PX_PER_POINT), 60)
@@ -88,9 +89,20 @@ def compose_appearance_image(
 
     if has_image:
         signature = Image.open(image_path).convert("RGBA")
-        max_w = left_width - 2 * _PADDING
-        max_h = height - 2 * _PADDING
-        signature.thumbnail((max(max_w, 1), max(max_h, 1)))
+        # Scaled from the left region's fit-to-box size, but capped at the
+        # box's own interior - a large scale grows the image up to (and not
+        # past) the box edges, even if that means overlapping the text side.
+        base_max_w = left_width - 2 * _PADDING
+        base_max_h = height - 2 * _PADDING
+        box_max_w = width - 2 * _PADDING
+        box_max_h = height - 2 * _PADDING
+        max_w = max(min(int(base_max_w * image_scale), box_max_w), 1)
+        max_h = max(min(int(base_max_h * image_scale), box_max_h), 1)
+        # thumbnail() only ever shrinks - resize explicitly so image_scale
+        # can also enlarge past the source image's native resolution.
+        fit = min(max_w / signature.width, max_h / signature.height)
+        new_size = (max(int(signature.width * fit), 1), max(int(signature.height * fit), 1))
+        signature = signature.resize(new_size, Image.LANCZOS)
         x = (left_width - signature.width) // 2
         y = (height - signature.height) // 2
         canvas.paste(signature, (x, y), signature)
