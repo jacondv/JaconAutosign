@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -156,15 +155,6 @@ class BoxEditDialog(QDialog):
         browse_btn = QPushButton("Choose signature image (.png)...")
         browse_btn.clicked.connect(self._browse_image)
 
-        self._font_size_spin = QSpinBox()
-        self._font_size_spin.setRange(0, 72)
-        self._font_size_spin.setSpecialValueText("Auto")
-        self._font_size_spin.setValue(appearance.font_size if appearance and appearance.font_size else 0)
-        self._font_size_spin.setToolTip(
-            "Font size (pt) for the text. 0 = auto (shrinks to fit its box)."
-        )
-        self._font_size_spin.valueChanged.connect(self._refresh_preview)
-
         # Default appearance: signature image on the left, "Signed by: <name>
         # / Date: <date>" on the right (Acrobat's default layout) - no extra
         # options needed. This checkbox only swaps in a CUSTOM text template.
@@ -192,7 +182,6 @@ class BoxEditDialog(QDialog):
         )
         form.addRow("", self._show_text_check)
         form.addRow("Custom text template:", self._text_template_edit)
-        form.addRow("Font size:", self._font_size_spin)
         form.addRow("", reset_position_btn)
 
         canvas_w, canvas_h = self._preview_canvas_size()
@@ -279,7 +268,12 @@ class BoxEditDialog(QDialog):
             text_pos=self._text_pos,
             image_size=self._image_size,
             text_size=self._text_size,
-            font_size=self._font_size_spin.value() or None,
+            # Fixed font sizes rendered wrong at actual sign time - the box
+            # editor's preview and the real signing pipeline scale text
+            # differently, so a size that looked right in one didn't match
+            # the other. Always auto (shrinks to fit the text's box) until
+            # that's fixed for real.
+            font_size=None,
         )
 
     # -------------------------------------------------------------- preview
