@@ -83,7 +83,6 @@ class SignScreen(QWidget):
         self._current_pdf_info: PdfInfo | None = None
         self._current_signed_pages: set[int] = set()
         self._worker: BatchSignWorker | None = None
-        self._active_page_scope: SignPageScope | None = None
         self._session_password: str | None = None
         self._panel_collapsed = False
         self._last_panel_width = _DEFAULT_PANEL_WIDTH
@@ -445,7 +444,6 @@ class SignScreen(QWidget):
         service = BatchSignService(self._pdf_inspect, engine)
         output_dir = self._settings_service.resolve_output_dir(settings, files_to_sign[0])
         page_scope = self._control_panel.current_page_scope()
-        self._active_page_scope = page_scope
         current_page_index = self._viewer.current_page() if self._current_file else None
 
         self._worker = BatchSignWorker(
@@ -490,11 +488,13 @@ class SignScreen(QWidget):
             target_page = self._viewer.current_page()
             self._load_preview(result.file_path, target_page)
             self._sync_preview_overlay()
-        if result.is_success and self._active_page_scope == SignPageScope.ALL:
-            # Only once every page this run was asked to sign is actually
-            # signed - a partial scope (current/first/last page) means the
-            # file isn't "done" yet, so it's left for the manual Move button
-            # instead of being filed away automatically.
+        if result.is_success and self._is_fully_signed(result.output_path):
+            # A file counts as "done" once every one of its pages actually
+            # has a signature - regardless of what scope this particular
+            # run used, so e.g. signing page-by-page across several runs
+            # still auto-files it the moment the last page lands. A file
+            # only partially signed so far is left for the manual Move
+            # button instead of being filed away too early.
             self._auto_move_if_matched(result)
 
     def _on_finished(self, results: list) -> None:
@@ -554,6 +554,15 @@ class SignScreen(QWidget):
             self._sync_preview_overlay()
 
     # ------------------------------------------------------- project folder
+    def _is_fully_signed(self, output_path: Path | None) -> bool:
+        if output_path is None or not output_path.exists():
+            return False
+        try:
+            info = self._pdf_inspect.get_info(output_path)
+        except PdfInspectError:
+            return False
+        return info.page_count > 0 and len(get_signed_pages(output_path)) >= info.page_count
+
     def _auto_move_if_matched(self, result) -> None:
         target = find_matching_project_folder(result.file_path)
         if target is None:
