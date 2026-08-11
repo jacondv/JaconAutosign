@@ -81,6 +81,13 @@ class Appearance:
     # render exactly as before until someone drags either one.
     image_pos: Optional[tuple] = None
     text_pos: Optional[tuple] = None
+    # (w_frac, h_frac) bounding box within the box, 0..1 - set by dragging a
+    # resize handle in the box editor. The image fits (aspect-preserved)
+    # within image_size; text_size is the wrap width/available height text
+    # auto-shrinks to fit. None means "not resized independently yet",
+    # falling back to image_scale / the classic split, same as image_pos.
+    image_size: Optional[tuple] = None
+    text_size: Optional[tuple] = None
 
     def to_dict(self) -> dict:
         return {
@@ -90,12 +97,16 @@ class Appearance:
             "image_scale": self.image_scale,
             "image_pos": list(self.image_pos) if self.image_pos else None,
             "text_pos": list(self.text_pos) if self.text_pos else None,
+            "image_size": list(self.image_size) if self.image_size else None,
+            "text_size": list(self.text_size) if self.text_size else None,
         }
 
     @staticmethod
     def from_dict(data: dict) -> "Appearance":
         image_pos = data.get("image_pos")
         text_pos = data.get("text_pos")
+        image_size = data.get("image_size")
+        text_size = data.get("text_size")
         return Appearance(
             image_path=data.get("image_path"),
             show_text=data.get("show_text", False),
@@ -103,6 +114,8 @@ class Appearance:
             image_scale=data.get("image_scale", 1.0),
             image_pos=tuple(image_pos) if image_pos else None,
             text_pos=tuple(text_pos) if text_pos else None,
+            image_size=tuple(image_size) if image_size else None,
+            text_size=tuple(text_size) if text_size else None,
         )
 
 

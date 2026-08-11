@@ -120,29 +120,35 @@ def compose_appearance_image(
     image_scale: float = 1.0,
     image_pos: tuple[float, float] | None = None,
     text_pos: tuple[float, float] | None = None,
+    image_size: tuple[float, float] | None = None,
+    text_size: tuple[float, float] | None = None,
 ) -> Image.Image:
     """image_pos (image center) / text_pos (text block top-left), each a
-    (x_frac, y_frac) of the box - None means "not positioned independently
-    yet", using the classic image-left/text-right split instead (see the
-    image_pos/text_pos docstring on the Appearance model)."""
+    (x_frac, y_frac) of the box; image_size / text_size, each a (w_frac,
+    h_frac) bounding box - None means "not positioned/resized independently
+    yet", using image_scale and the classic image-left/text-right split
+    instead (see the docstring on the Appearance model)."""
     width = max(int(box_width_pt * _PX_PER_POINT), 120)
     height = max(int(box_height_pt * _PX_PER_POINT), 60)
     canvas = Image.new("RGBA", (width, height), (255, 255, 255, 0))
 
     has_image = bool(image_path)
     has_text = bool(text_lines)
-    custom_layout = image_pos is not None or text_pos is not None
-    # The left/right split only applies in the classic (non-custom) layout -
-    # once either element is independently positioned, each is free to use
-    # the whole box.
-    left_width = int(width * _LEFT_RATIO) if has_image and has_text and not custom_layout else width
+    # Reference split point for whichever element hasn't been customized
+    # yet - independent of the OTHER element's customization state, so
+    # e.g. dragging just the image doesn't disturb the text's default slot
+    # (and vice versa) until that element is itself customized too.
+    left_width = int(width * _LEFT_RATIO) if has_image and has_text else width
 
     if has_image:
         box_max_w = width - 2 * _PADDING
         box_max_h = height - 2 * _PADDING
-        base_max_w = box_max_w if custom_layout else (left_width - 2 * _PADDING)
-        max_w = min(int(base_max_w * image_scale), box_max_w)
-        max_h = min(int(box_max_h * image_scale), box_max_h)
+        if image_size is not None:
+            max_w = min(int(image_size[0] * width), box_max_w)
+            max_h = min(int(image_size[1] * height), box_max_h)
+        else:
+            max_w = min(int((left_width - 2 * _PADDING) * image_scale), box_max_w)
+            max_h = min(int(box_max_h * image_scale), box_max_h)
         signature = fit_image(image_path, max_w, max_h)
         if image_pos is not None:
             cx, cy = image_pos[0] * width, image_pos[1] * height
@@ -156,11 +162,15 @@ def compose_appearance_image(
     if has_text:
         draw = ImageDraw.Draw(canvas)
         default_text_x = (left_width + _PADDING) if has_image else _PADDING
-        available_w = (
-            max(width - 2 * _PADDING, 10) if text_pos is not None
-            else max(width - default_text_x - _PADDING, 10)
-        )
-        available_h = height - 2 * _PADDING
+        if text_size is not None:
+            available_w = max(int(text_size[0] * width), 10)
+            available_h = max(int(text_size[1] * height), 10)
+        else:
+            available_w = (
+                max(width - 2 * _PADDING, 10) if text_pos is not None
+                else max(width - default_text_x - _PADDING, 10)
+            )
+            available_h = height - 2 * _PADDING
         wrapped_lines, font, line_height = layout_text(text_lines, available_w, available_h, font_size_pt)
         total_h = line_height * len(wrapped_lines)
 

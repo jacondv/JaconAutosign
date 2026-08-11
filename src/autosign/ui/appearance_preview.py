@@ -36,6 +36,8 @@ def render_appearance_preview(
         appearance.image_scale,
         appearance.image_pos,
         appearance.text_pos,
+        appearance.image_size,
+        appearance.text_size,
     )
     rgba = image.convert("RGBA")
     data = rgba.tobytes("raw", "RGBA")

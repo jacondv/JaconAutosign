@@ -1,10 +1,11 @@
-"""Dialog to configure one signature box: label, signature image, image
-size, and - by dragging directly in the live preview - independent
-positions for the image and the text, decoupled from the classic
-image-left/text-right split. No need to go through the Sign screen to see
-the effect. Which page(s) get signed is no longer decided here - it's
-chosen at sign time in the left panel (Page scope), applying uniformly to
-every box."""
+"""Dialog to configure one signature box: label, signature image, and -
+directly in the live preview - independent position AND size for both the
+image and the text info, decoupled from the classic image-left/text-right
+split. Drag a box's body to move it, drag the little square at its
+bottom-right corner to resize it - no need to go through the Sign screen
+to see the effect. Which page(s) get signed is no longer decided here -
+it's chosen at sign time in the left panel (Page scope), applying
+uniformly to every box."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -40,6 +41,8 @@ from ..signing.appearance_compose import (
 _PREVIEW_SIGNER_NAME = "Signer Name"
 _PREVIEW_WIDTH = 280
 _TEXT_COLOR = (20, 20, 20, 255)
+_MIN_BOX_PX = 20
+_HANDLE_SIZE = 10
 
 
 def _pil_to_qpixmap(image: Image.Image) -> QPixmap:
@@ -49,16 +52,55 @@ def _pil_to_qpixmap(image: Image.Image) -> QPixmap:
     return QPixmap.fromImage(qimage.copy())  # copy: detach from the bytes buffer above
 
 
-class _DraggableLabel(QLabel):
-    """A pixmap that can be dragged anywhere within its parent widget -
-    the box editor's preview canvas."""
+class _ResizeHandle(QLabel):
+    """Small square at a draggable box's bottom-right corner - drag it to
+    resize that box directly, live."""
+
+    resized = Signal(int, int)  # new box width/height, in canvas pixels
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setFixedSize(_HANDLE_SIZE, _HANDLE_SIZE)
+        self.setStyleSheet("background-color: #2f7de1; border: 1px solid white;")
+        self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        self._dragging = False
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = True
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if not self._dragging:
+            return
+        # event.pos() is relative to this handle; self.pos() is the handle's
+        # own top-left within its parent box - summing gives the mouse
+        # position relative to the box's top-left, i.e. the new box size
+        # (the box's top-left is the resize anchor).
+        pos_in_box = self.pos() + event.pos()
+        self.resized.emit(pos_in_box.x(), pos_in_box.y())
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        self._dragging = False
+
+
+class _DraggableBox(QLabel):
+    """A box (sized to fit the pixmap set on it) that can be dragged
+    anywhere within its parent widget - the box editor's preview canvas -
+    and resized via its corner _ResizeHandle."""
 
     moved = Signal()
+    resized = Signal(int, int)
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self._drag_offset: QPoint | None = None
+        self.handle = _ResizeHandle(self)
+        self.handle.resized.connect(self.resized)
+
+    def reposition_handle(self) -> None:
+        self.handle.move(self.width() - _HANDLE_SIZE, self.height() - _HANDLE_SIZE)
+        self.handle.raise_()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         if event.button() == Qt.MouseButton.LeftButton:
@@ -100,6 +142,8 @@ class BoxEditDialog(QDialog):
         self._image_path = appearance.image_path if appearance else None
         self._image_pos = appearance.image_pos if appearance else None
         self._text_pos = appearance.text_pos if appearance else None
+        self._image_size = appearance.image_size if appearance else None
+        self._text_size = appearance.text_size if appearance else None
 
         self._label_edit = QLineEdit(label or "Signature")
         self._label_edit.textChanged.connect(self._refresh_preview)
@@ -114,8 +158,8 @@ class BoxEditDialog(QDialog):
         self._image_scale_spin.setSuffix("x")
         self._image_scale_spin.setValue(appearance.image_scale if appearance else 1.0)
         self._image_scale_spin.setToolTip(
-            "Scales the signature image within its box (1.0x = default fit).\n"
-            "Larger values grow the image up to the box's edges."
+            "Used until the image is resized by dragging its corner handle\n"
+            "in the preview - after that, the dragged size takes over."
         )
         self._image_scale_spin.valueChanged.connect(self._refresh_preview)
 
@@ -131,7 +175,7 @@ class BoxEditDialog(QDialog):
         )
         self._text_template_edit.textChanged.connect(self._refresh_preview)
 
-        reset_position_btn = QPushButton("Reset position (image left / text right)")
+        reset_position_btn = QPushButton("Reset position && size (image left / text right)")
         reset_position_btn.clicked.connect(self._reset_position)
 
         form = QFormLayout()
@@ -160,16 +204,22 @@ class BoxEditDialog(QDialog):
         self._preview_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._preview_empty_label.setWordWrap(True)
 
-        self._image_label = _DraggableLabel(self._preview_canvas)
-        self._image_label.moved.connect(self._on_image_moved)
-        self._image_label.hide()
+        self._image_box = _DraggableBox(self._preview_canvas)
+        self._image_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._image_box.moved.connect(self._on_image_moved)
+        self._image_box.resized.connect(self._on_image_resized)
+        self._image_box.hide()
 
-        self._text_label = _DraggableLabel(self._preview_canvas)
-        self._text_label.moved.connect(self._on_text_moved)
-        self._text_label.hide()
+        self._text_box = _DraggableBox(self._preview_canvas)
+        self._text_box.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._text_box.moved.connect(self._on_text_moved)
+        self._text_box.resized.connect(self._on_text_resized)
+        self._text_box.hide()
 
         preview_layout = QVBoxLayout()
-        preview_layout.addWidget(QLabel("Drag the image or the text to position them:"))
+        preview_layout.addWidget(
+            QLabel("Drag a box to move it, drag its corner handle to resize it:")
+        )
         preview_layout.addWidget(self._preview_canvas, 0, Qt.AlignmentFlag.AlignHCenter)
         preview_layout.addStretch(1)
         preview_group = QGroupBox("Preview")
@@ -204,6 +254,8 @@ class BoxEditDialog(QDialog):
     def _reset_position(self) -> None:
         self._image_pos = None
         self._text_pos = None
+        self._image_size = None
+        self._text_size = None
         self._refresh_preview()
 
     def result_label(self) -> str:
@@ -223,6 +275,8 @@ class BoxEditDialog(QDialog):
             image_scale=self._image_scale_spin.value(),
             image_pos=self._image_pos,
             text_pos=self._text_pos,
+            image_size=self._image_size,
+            text_size=self._text_size,
         )
 
     # -------------------------------------------------------------- preview
@@ -232,15 +286,36 @@ class BoxEditDialog(QDialog):
 
     def _on_image_moved(self) -> None:
         cw, ch = self._preview_canvas.width(), self._preview_canvas.height()
-        label = self._image_label
-        cx = label.x() + label.width() / 2
-        cy = label.y() + label.height() / 2
+        box = self._image_box
+        cx, cy = box.x() + box.width() / 2, box.y() + box.height() / 2
         self._image_pos = (cx / cw, cy / ch)
 
     def _on_text_moved(self) -> None:
         cw, ch = self._preview_canvas.width(), self._preview_canvas.height()
-        label = self._text_label
-        self._text_pos = (label.x() / cw, label.y() / ch)
+        box = self._text_box
+        self._text_pos = (box.x() / cw, box.y() / ch)
+
+    def _on_image_resized(self, new_w: int, new_h: int) -> None:
+        cw, ch = self._preview_canvas.width(), self._preview_canvas.height()
+        box = self._image_box
+        box_x, box_y = box.x(), box.y()  # top-left is the resize anchor
+        new_w = max(_MIN_BOX_PX, min(new_w, cw - box_x))
+        new_h = max(_MIN_BOX_PX, min(new_h, ch - box_y))
+        self._image_size = (new_w / cw, new_h / ch)
+        # Re-derive the center-based image_pos so the anchored top-left
+        # doesn't jump once _refresh_preview() re-centers on it.
+        self._image_pos = ((box_x + new_w / 2) / cw, (box_y + new_h / 2) / ch)
+        self._refresh_preview()
+
+    def _on_text_resized(self, new_w: int, new_h: int) -> None:
+        cw, ch = self._preview_canvas.width(), self._preview_canvas.height()
+        box = self._text_box
+        box_x, box_y = box.x(), box.y()
+        new_w = max(_MIN_BOX_PX, min(new_w, cw - box_x))
+        new_h = max(_MIN_BOX_PX, min(new_h, ch - box_y))
+        self._text_size = (new_w / cw, new_h / ch)
+        self._text_pos = (box_x / cw, box_y / ch)
+        self._refresh_preview()
 
     def _refresh_preview(self) -> None:
         appearance = self.result_appearance()
@@ -249,69 +324,87 @@ class BoxEditDialog(QDialog):
         has_text = bool(text_lines)
 
         if not has_image and not has_text:
-            self._image_label.hide()
-            self._text_label.hide()
+            self._image_box.hide()
+            self._text_box.hide()
             self._preview_empty_label.setText("(no signature image yet)")
             self._preview_empty_label.show()
             return
         self._preview_empty_label.hide()
 
         cw, ch = self._preview_canvas.width(), self._preview_canvas.height()
-        custom_layout = self._image_pos is not None or self._text_pos is not None
-        left_width = int(cw * _LEFT_RATIO) if has_image and has_text and not custom_layout else cw
+        # Reference split point for whichever element hasn't been
+        # customized yet - independent of the OTHER element's customization
+        # state, so dragging just one doesn't disturb the other's default
+        # slot until it's customized too.
+        left_width = int(cw * _LEFT_RATIO) if has_image and has_text else cw
 
         if has_image:
             box_max_w, box_max_h = cw - 2 * _PADDING, ch - 2 * _PADDING
-            base_max_w = box_max_w if custom_layout else (left_width - 2 * _PADDING)
-            max_w = min(int(base_max_w * appearance.image_scale), box_max_w)
-            max_h = min(int(box_max_h * appearance.image_scale), box_max_h)
+            if self._image_size is not None:
+                box_w = min(int(self._image_size[0] * cw), box_max_w)
+                box_h = min(int(self._image_size[1] * ch), box_max_h)
+            else:
+                box_w = min(int((left_width - 2 * _PADDING) * appearance.image_scale), box_max_w)
+                box_h = min(int(box_max_h * appearance.image_scale), box_max_h)
             try:
-                pil_image = fit_image(appearance.image_path, max_w, max_h)
+                pixmap = _pil_to_qpixmap(fit_image(appearance.image_path, box_w, box_h))
             except (OSError, ValueError):
-                pil_image = None
-            if pil_image is not None:
-                pixmap = _pil_to_qpixmap(pil_image)
-                self._image_label.setPixmap(pixmap)
-                self._image_label.resize(pixmap.size())
+                pixmap = None
+            if pixmap is not None:
+                self._image_box.setPixmap(pixmap)
+                self._image_box.resize(max(box_w, 1), max(box_h, 1))
+                self._image_box.reposition_handle()
                 if self._image_pos is not None:
                     cx, cy = self._image_pos[0] * cw, self._image_pos[1] * ch
-                    x = int(min(max(cx - pixmap.width() / 2, 0), cw - pixmap.width()))
-                    y = int(min(max(cy - pixmap.height() / 2, 0), ch - pixmap.height()))
+                    x = int(min(max(cx - box_w / 2, 0), cw - box_w))
+                    y = int(min(max(cy - box_h / 2, 0), ch - box_h))
                 else:
-                    x = (left_width - pixmap.width()) // 2
-                    y = (ch - pixmap.height()) // 2
-                self._image_label.move(max(x, 0), max(y, 0))
-                self._image_label.show()
+                    x = (left_width - box_w) // 2
+                    y = (ch - box_h) // 2
+                self._image_box.move(max(x, 0), max(y, 0))
+                self._image_box.show()
             else:
-                self._image_label.hide()
+                self._image_box.hide()
         else:
-            self._image_label.hide()
+            self._image_box.hide()
 
         if has_text:
             default_text_x = (left_width + _PADDING) if has_image else _PADDING
-            available_w = (
-                max(cw - 2 * _PADDING, 10) if self._text_pos is not None
-                else max(cw - default_text_x - _PADDING, 10)
-            )
-            available_h = ch - 2 * _PADDING
-            wrapped_lines, font, line_height = layout_text(text_lines, available_w, available_h, None)
+            if self._text_size is not None:
+                avail_w = max(int(self._text_size[0] * cw), _MIN_BOX_PX)
+                avail_h = max(int(self._text_size[1] * ch), _MIN_BOX_PX)
+            elif self._text_pos is not None:
+                avail_w = max(cw - 2 * _PADDING, 10)
+                avail_h = ch - 2 * _PADDING
+            else:
+                avail_w = max(cw - default_text_x - _PADDING, 10)
+                avail_h = ch - 2 * _PADDING
+            wrapped_lines, font, line_height = layout_text(text_lines, avail_w, avail_h, None)
             total_h = line_height * len(wrapped_lines)
-            text_image = Image.new("RGBA", (max(available_w, 1), max(total_h, 1)), (255, 255, 255, 0))
+            # Once resized, the box IS the dragged bounding rect (so the
+            # handle stays where it was left); otherwise it hugs the actual
+            # content height, same as the classic vertically-centered
+            # layout - matches compose_appearance_image's own positioning,
+            # which is never wider/taller than what's actually drawn either.
+            box_w, box_h = avail_w, (avail_h if self._text_size is not None else total_h)
+
+            text_image = Image.new("RGBA", (max(box_w, 1), max(box_h, 1)), (255, 255, 255, 0))
             draw = ImageDraw.Draw(text_image)
             y = 0
             for line in wrapped_lines:
                 draw.text((0, y), line, fill=_TEXT_COLOR, font=font)
                 y += line_height
             pixmap = _pil_to_qpixmap(text_image)
-            self._text_label.setPixmap(pixmap)
-            self._text_label.resize(pixmap.size())
+            self._text_box.setPixmap(pixmap)
+            self._text_box.resize(max(box_w, 1), max(box_h, 1))
+            self._text_box.reposition_handle()
             if self._text_pos is not None:
-                x = int(min(max(self._text_pos[0] * cw, 0), max(cw - pixmap.width(), 0)))
-                y = int(min(max(self._text_pos[1] * ch, 0), max(ch - pixmap.height(), 0)))
+                x = int(min(max(self._text_pos[0] * cw, 0), max(cw - box_w, 0)))
+                y = int(min(max(self._text_pos[1] * ch, 0), max(ch - box_h, 0)))
             else:
                 x = default_text_x
-                y = max(_PADDING, (ch - total_h) // 2)
-            self._text_label.move(max(x, 0), max(y, 0))
-            self._text_label.show()
+                y = max(_PADDING, (ch - box_h) // 2)
+            self._text_box.move(max(x, 0), max(y, 0))
+            self._text_box.show()
         else:
-            self._text_label.hide()
+            self._text_box.hide()

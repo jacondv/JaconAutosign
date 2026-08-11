@@ -158,6 +158,8 @@ class SigningEngine:
             box.appearance.image_scale,
             box.appearance.image_pos,
             box.appearance.text_pos,
+            box.appearance.image_size,
+            box.appearance.text_size,
         )
         return stamp.StaticStampStyle(
             background=images.PdfImage(composed), border_width=0, background_opacity=1.0
