@@ -28,6 +28,7 @@ class FileListPanel(QWidget):
     file_activated = Signal(Path)  # double-click
     files_changed = Signal()  # files were added/removed/cleared - caller should refresh()
     reset_requested = Signal(list)  # list[Path] - the selected files
+    move_current_requested = Signal()  # move the currently-open file to its project folder
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -51,10 +52,17 @@ class FileListPanel(QWidget):
         reset_btn = QPushButton("Reset")
         reset_btn.setToolTip("Discard the signed output for the selected file(s) so the next Sign starts over from the original.")
         reset_btn.clicked.connect(lambda: self.reset_requested.emit(self.selected_files()))
+        move_btn = QPushButton("Move")
+        move_btn.setToolTip(
+            "Move the currently open file's signed output into its matching numbered "
+            "project folder, deleting the original."
+        )
+        move_btn.clicked.connect(self.move_current_requested)
         clear_btn = QPushButton("Clear")
         clear_btn.clicked.connect(self.clear)
         buttons.addWidget(remove_btn)
         buttons.addWidget(reset_btn)
+        buttons.addWidget(move_btn)
         buttons.addWidget(clear_btn)
         layout.addLayout(buttons)
 
@@ -99,10 +107,13 @@ class FileListPanel(QWidget):
                 return
 
     def remove_selected(self) -> None:
-        selected = {item.data(_ROLE_PATH) for item in self._list.selectedItems()}
-        if not selected:
+        self.remove_paths(item.data(_ROLE_PATH) for item in self._list.selectedItems())
+
+    def remove_paths(self, paths: Iterable[Path]) -> None:
+        to_remove = set(paths)
+        if not to_remove:
             return
-        self._files = [f for f in self._files if f not in selected]
+        self._files = [f for f in self._files if f not in to_remove]
         self.files_changed.emit()
 
     def clear(self) -> None:

@@ -33,6 +33,11 @@ from ..models import SignPageScope
 from ..services import PdfInfo, PdfInspectService, SettingsService, TemplateService, get_signed_pages
 from ..services.batch_sign_service import BatchSignService
 from ..services.pdf_inspect_service import PdfInspectError
+from ..services.project_folder_service import (
+    MoveCollisionError,
+    find_matching_project_folder,
+    move_signed_file,
+)
 from ..signing import CertificateLoadError, Pkcs12CertificateProvider, SigningEngine
 from .batch_sign_worker import BatchSignWorker
 from .coordinates import pdf_rect_to_pixel
@@ -78,6 +83,7 @@ class SignScreen(QWidget):
         self._current_pdf_info: PdfInfo | None = None
         self._current_signed_pages: set[int] = set()
         self._worker: BatchSignWorker | None = None
+        self._active_page_scope: SignPageScope | None = None
         self._session_password: str | None = None
         self._panel_collapsed = False
         self._last_panel_width = _DEFAULT_PANEL_WIDTH
@@ -112,6 +118,7 @@ class SignScreen(QWidget):
         self._file_panel.selection_changed.connect(self._on_file_selection_changed)
         self._file_panel.file_activated.connect(self._open_output_for)
         self._file_panel.reset_requested.connect(self._on_reset_requested)
+        self._file_panel.move_current_requested.connect(self._manual_move_current_file)
         layout.addWidget(self._file_panel, 2)
 
         self._control_panel = SignControlPanel()
@@ -438,6 +445,7 @@ class SignScreen(QWidget):
         service = BatchSignService(self._pdf_inspect, engine)
         output_dir = self._settings_service.resolve_output_dir(settings, files_to_sign[0])
         page_scope = self._control_panel.current_page_scope()
+        self._active_page_scope = page_scope
         current_page_index = self._viewer.current_page() if self._current_file else None
 
         self._worker = BatchSignWorker(
@@ -482,6 +490,12 @@ class SignScreen(QWidget):
             target_page = self._viewer.current_page()
             self._load_preview(result.file_path, target_page)
             self._sync_preview_overlay()
+        if result.is_success and self._active_page_scope == SignPageScope.ALL:
+            # Only once every page this run was asked to sign is actually
+            # signed - a partial scope (current/first/last page) means the
+            # file isn't "done" yet, so it's left for the manual Move button
+            # instead of being filed away automatically.
+            self._auto_move_if_matched(result)
 
     def _on_finished(self, results: list) -> None:
         self._set_running(False)
@@ -538,6 +552,63 @@ class SignScreen(QWidget):
         if self._current_file in to_delete:
             self._load_preview(self._current_file)
             self._sync_preview_overlay()
+
+    # ------------------------------------------------------- project folder
+    def _auto_move_if_matched(self, result) -> None:
+        target = find_matching_project_folder(result.file_path)
+        if target is None:
+            return
+        self._perform_move(result.file_path, result.output_path, target, silent=True)
+
+    def _manual_move_current_file(self) -> None:
+        source_file = self._current_file
+        if source_file is None:
+            QMessageBox.information(self, "No file selected", "Select a file in the list first.")
+            return
+        signed_path = self._resolve_output_path(source_file)
+        if not signed_path.exists():
+            QMessageBox.information(
+                self, "Not signed yet", f"{source_file.name} has no signed output yet."
+            )
+            return
+        target = find_matching_project_folder(source_file)
+        if target is None:
+            chosen = QFileDialog.getExistingDirectory(
+                self, "Choose destination folder", str(source_file.parent)
+            )
+            if not chosen:
+                return
+            target = Path(chosen)
+        self._perform_move(source_file, signed_path, target, silent=False)
+
+    def _perform_move(self, source_file: Path, signed_path: Path, target: Path, silent: bool) -> None:
+        try:
+            destination = move_signed_file(signed_path, source_file, target)
+        except MoveCollisionError as exc:
+            confirm = QMessageBox.question(
+                self,
+                "File already exists",
+                f"'{exc.destination.name}' already exists in {target.name}\\. Overwrite it?",
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                destination = move_signed_file(signed_path, source_file, target, overwrite=True)
+            except OSError as exc2:
+                QMessageBox.warning(self, "Move failed", f"{source_file.name}: {exc2}")
+                return
+        except OSError as exc:
+            QMessageBox.warning(self, "Move failed", f"{source_file.name}: {exc}")
+            return
+
+        self._results.pop(source_file, None)
+        self._file_panel.remove_paths([source_file])  # also clears the viewer if it was open
+        if silent:
+            self._control_panel.set_summary(f"Moved {destination.name} → {target.name}\\")
+        else:
+            QMessageBox.information(
+                self, "Moved", f"Moved {destination.name} into {target.name}\\."
+            )
 
     # ---------------------------------------------------------------- output
     def _open_output_for(self, path: Path) -> None:
