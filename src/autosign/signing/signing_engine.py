@@ -156,6 +156,8 @@ class SigningEngine:
             rect.height,
             self._font_size_pt,
             box.appearance.image_scale,
+            box.appearance.image_pos,
+            box.appearance.text_pos,
         )
         return stamp.StaticStampStyle(
             background=images.PdfImage(composed), border_width=0, background_opacity=1.0

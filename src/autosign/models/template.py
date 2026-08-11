@@ -74,6 +74,13 @@ class Appearance:
     show_text: bool = False
     text_template: Optional[str] = None
     image_scale: float = 1.0
+    # (x_frac, y_frac) within the box, 0..1 - image_pos is the image's
+    # CENTER, text_pos is the text block's TOP-LEFT corner. None means "not
+    # positioned independently yet": both default to the classic image-left
+    # / text-right split (see appearance_compose.py), so existing templates
+    # render exactly as before until someone drags either one.
+    image_pos: Optional[tuple] = None
+    text_pos: Optional[tuple] = None
 
     def to_dict(self) -> dict:
         return {
@@ -81,15 +88,21 @@ class Appearance:
             "show_text": self.show_text,
             "text_template": self.text_template,
             "image_scale": self.image_scale,
+            "image_pos": list(self.image_pos) if self.image_pos else None,
+            "text_pos": list(self.text_pos) if self.text_pos else None,
         }
 
     @staticmethod
     def from_dict(data: dict) -> "Appearance":
+        image_pos = data.get("image_pos")
+        text_pos = data.get("text_pos")
         return Appearance(
             image_path=data.get("image_path"),
             show_text=data.get("show_text", False),
             text_template=data.get("text_template"),
             image_scale=data.get("image_scale", 1.0),
+            image_pos=tuple(image_pos) if image_pos else None,
+            text_pos=tuple(text_pos) if text_pos else None,
         )
 
 

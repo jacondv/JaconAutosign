@@ -28,7 +28,14 @@ def render_appearance_preview(
         return None
     text_lines = build_text_lines(appearance, signer_name, datetime.now().astimezone())
     image = compose_appearance_image(
-        appearance.image_path, text_lines, width_pt, height_pt, font_size_pt, appearance.image_scale
+        appearance.image_path,
+        text_lines,
+        width_pt,
+        height_pt,
+        font_size_pt,
+        appearance.image_scale,
+        appearance.image_pos,
+        appearance.text_pos,
     )
     rgba = image.convert("RGBA")
     data = rgba.tobytes("raw", "RGBA")

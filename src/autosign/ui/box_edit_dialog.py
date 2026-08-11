@@ -1,12 +1,17 @@
-"""Dialog to configure one signature box: label, signature image, and image
-size - with a live preview so the effect is visible immediately, without
-going through the Sign screen. Which page(s) get signed is no longer
-decided here - it's chosen at sign time in the left panel (Page scope),
-applying uniformly to every box."""
+"""Dialog to configure one signature box: label, signature image, image
+size, and - by dragging directly in the live preview - independent
+positions for the image and the text, decoupled from the classic
+image-left/text-right split. No need to go through the Sign screen to see
+the effect. Which page(s) get signed is no longer decided here - it's
+chosen at sign time in the left panel (Page scope), applying uniformly to
+every box."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
+from datetime import datetime
+
+from PIL import Image, ImageDraw
+from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -20,13 +25,59 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..models import Appearance, PageRef, PageRefType
-from .appearance_preview import render_appearance_preview
+from ..signing.appearance_compose import (
+    _LEFT_RATIO,
+    _PADDING,
+    build_text_lines,
+    fit_image,
+    layout_text,
+)
 
 _PREVIEW_SIGNER_NAME = "Signer Name"
-_PREVIEW_MAX_WIDTH = 280
+_PREVIEW_WIDTH = 280
+_TEXT_COLOR = (20, 20, 20, 255)
+
+
+def _pil_to_qpixmap(image: Image.Image) -> QPixmap:
+    rgba = image.convert("RGBA")
+    data = rgba.tobytes("raw", "RGBA")
+    qimage = QImage(data, rgba.width, rgba.height, QImage.Format.Format_RGBA8888)
+    return QPixmap.fromImage(qimage.copy())  # copy: detach from the bytes buffer above
+
+
+class _DraggableLabel(QLabel):
+    """A pixmap that can be dragged anywhere within its parent widget -
+    the box editor's preview canvas."""
+
+    moved = Signal()
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self._drag_offset: QPoint | None = None
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = event.pos()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if self._drag_offset is None:
+            return
+        parent = self.parentWidget()
+        target = self.mapToParent(event.pos() - self._drag_offset)
+        x = max(0, min(target.x(), parent.width() - self.width()))
+        y = max(0, min(target.y(), parent.height() - self.height()))
+        self.move(x, y)
+        self.moved.emit()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        self._drag_offset = None
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
 
 
 class BoxEditDialog(QDialog):
@@ -47,6 +98,8 @@ class BoxEditDialog(QDialog):
         self._box_width_pt = box_width_pt
         self._box_height_pt = box_height_pt
         self._image_path = appearance.image_path if appearance else None
+        self._image_pos = appearance.image_pos if appearance else None
+        self._text_pos = appearance.text_pos if appearance else None
 
         self._label_edit = QLineEdit(label or "Signature")
         self._label_edit.textChanged.connect(self._refresh_preview)
@@ -78,6 +131,9 @@ class BoxEditDialog(QDialog):
         )
         self._text_template_edit.textChanged.connect(self._refresh_preview)
 
+        reset_position_btn = QPushButton("Reset position (image left / text right)")
+        reset_position_btn.clicked.connect(self._reset_position)
+
         form = QFormLayout()
         form.addRow("Label:", self._label_edit)
 
@@ -91,14 +147,31 @@ class BoxEditDialog(QDialog):
         )
         form.addRow("", self._show_text_check)
         form.addRow("Custom text template:", self._text_template_edit)
+        form.addRow("", reset_position_btn)
 
-        self._preview_label = QLabel("(no signature image yet)")
-        self._preview_label.setWordWrap(True)
-        self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._preview_label.setMinimumHeight(120)
-        self._preview_label.setFrameShape(QLabel.Shape.StyledPanel)
+        canvas_w, canvas_h = self._preview_canvas_size()
+        self._preview_canvas = QWidget()
+        self._preview_canvas.setFixedSize(canvas_w, canvas_h)
+        self._preview_canvas.setStyleSheet(
+            "background-color: white; border: 1px solid palette(mid);"
+        )
+        self._preview_empty_label = QLabel("(no signature image yet)", self._preview_canvas)
+        self._preview_empty_label.setGeometry(0, 0, canvas_w, canvas_h)
+        self._preview_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preview_empty_label.setWordWrap(True)
+
+        self._image_label = _DraggableLabel(self._preview_canvas)
+        self._image_label.moved.connect(self._on_image_moved)
+        self._image_label.hide()
+
+        self._text_label = _DraggableLabel(self._preview_canvas)
+        self._text_label.moved.connect(self._on_text_moved)
+        self._text_label.hide()
+
         preview_layout = QVBoxLayout()
-        preview_layout.addWidget(self._preview_label, 1)
+        preview_layout.addWidget(QLabel("Drag the image or the text to position them:"))
+        preview_layout.addWidget(self._preview_canvas, 0, Qt.AlignmentFlag.AlignHCenter)
+        preview_layout.addStretch(1)
         preview_group = QGroupBox("Preview")
         preview_group.setLayout(preview_layout)
 
@@ -118,6 +191,7 @@ class BoxEditDialog(QDialog):
 
         self._refresh_preview()
 
+    # ----------------------------------------------------------------- data
     def _browse_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose signature image", "", "PNG image (*.png);;All files (*.*)"
@@ -127,26 +201,10 @@ class BoxEditDialog(QDialog):
             self._image_path_label.setText(path)
             self._refresh_preview()
 
-    def _refresh_preview(self) -> None:
-        pixmap = render_appearance_preview(
-            self._current_appearance(), self._box_width_pt, self._box_height_pt, _PREVIEW_SIGNER_NAME
-        )
-        if pixmap is None:
-            self._preview_label.setPixmap(QPixmap())
-            self._preview_label.setText("(no signature image yet)")
-            return
-        if pixmap.width() > _PREVIEW_MAX_WIDTH:
-            pixmap = pixmap.scaledToWidth(_PREVIEW_MAX_WIDTH, Qt.TransformationMode.SmoothTransformation)
-        self._preview_label.setText("")
-        self._preview_label.setPixmap(pixmap)
-
-    def _current_appearance(self) -> Appearance:
-        return Appearance(
-            image_path=self._image_path,
-            show_text=self._show_text_check.isChecked(),
-            text_template=self._text_template_edit.text() if self._show_text_check.isChecked() else None,
-            image_scale=self._image_scale_spin.value(),
-        )
+    def _reset_position(self) -> None:
+        self._image_pos = None
+        self._text_pos = None
+        self._refresh_preview()
 
     def result_label(self) -> str:
         return self._label_edit.text().strip() or "Signature"
@@ -158,4 +216,102 @@ class BoxEditDialog(QDialog):
         return PageRef(type=PageRefType.ALL)
 
     def result_appearance(self) -> Appearance:
-        return self._current_appearance()
+        return Appearance(
+            image_path=self._image_path,
+            show_text=self._show_text_check.isChecked(),
+            text_template=self._text_template_edit.text() if self._show_text_check.isChecked() else None,
+            image_scale=self._image_scale_spin.value(),
+            image_pos=self._image_pos,
+            text_pos=self._text_pos,
+        )
+
+    # -------------------------------------------------------------- preview
+    def _preview_canvas_size(self) -> tuple[int, int]:
+        ratio = self._box_height_pt / self._box_width_pt if self._box_width_pt else 0.4
+        return _PREVIEW_WIDTH, max(int(_PREVIEW_WIDTH * ratio), 60)
+
+    def _on_image_moved(self) -> None:
+        cw, ch = self._preview_canvas.width(), self._preview_canvas.height()
+        label = self._image_label
+        cx = label.x() + label.width() / 2
+        cy = label.y() + label.height() / 2
+        self._image_pos = (cx / cw, cy / ch)
+
+    def _on_text_moved(self) -> None:
+        cw, ch = self._preview_canvas.width(), self._preview_canvas.height()
+        label = self._text_label
+        self._text_pos = (label.x() / cw, label.y() / ch)
+
+    def _refresh_preview(self) -> None:
+        appearance = self.result_appearance()
+        has_image = bool(appearance.image_path)
+        text_lines = build_text_lines(appearance, _PREVIEW_SIGNER_NAME, datetime.now().astimezone())
+        has_text = bool(text_lines)
+
+        if not has_image and not has_text:
+            self._image_label.hide()
+            self._text_label.hide()
+            self._preview_empty_label.setText("(no signature image yet)")
+            self._preview_empty_label.show()
+            return
+        self._preview_empty_label.hide()
+
+        cw, ch = self._preview_canvas.width(), self._preview_canvas.height()
+        custom_layout = self._image_pos is not None or self._text_pos is not None
+        left_width = int(cw * _LEFT_RATIO) if has_image and has_text and not custom_layout else cw
+
+        if has_image:
+            box_max_w, box_max_h = cw - 2 * _PADDING, ch - 2 * _PADDING
+            base_max_w = box_max_w if custom_layout else (left_width - 2 * _PADDING)
+            max_w = min(int(base_max_w * appearance.image_scale), box_max_w)
+            max_h = min(int(box_max_h * appearance.image_scale), box_max_h)
+            try:
+                pil_image = fit_image(appearance.image_path, max_w, max_h)
+            except (OSError, ValueError):
+                pil_image = None
+            if pil_image is not None:
+                pixmap = _pil_to_qpixmap(pil_image)
+                self._image_label.setPixmap(pixmap)
+                self._image_label.resize(pixmap.size())
+                if self._image_pos is not None:
+                    cx, cy = self._image_pos[0] * cw, self._image_pos[1] * ch
+                    x = int(min(max(cx - pixmap.width() / 2, 0), cw - pixmap.width()))
+                    y = int(min(max(cy - pixmap.height() / 2, 0), ch - pixmap.height()))
+                else:
+                    x = (left_width - pixmap.width()) // 2
+                    y = (ch - pixmap.height()) // 2
+                self._image_label.move(max(x, 0), max(y, 0))
+                self._image_label.show()
+            else:
+                self._image_label.hide()
+        else:
+            self._image_label.hide()
+
+        if has_text:
+            default_text_x = (left_width + _PADDING) if has_image else _PADDING
+            available_w = (
+                max(cw - 2 * _PADDING, 10) if self._text_pos is not None
+                else max(cw - default_text_x - _PADDING, 10)
+            )
+            available_h = ch - 2 * _PADDING
+            wrapped_lines, font, line_height = layout_text(text_lines, available_w, available_h, None)
+            total_h = line_height * len(wrapped_lines)
+            text_image = Image.new("RGBA", (max(available_w, 1), max(total_h, 1)), (255, 255, 255, 0))
+            draw = ImageDraw.Draw(text_image)
+            y = 0
+            for line in wrapped_lines:
+                draw.text((0, y), line, fill=_TEXT_COLOR, font=font)
+                y += line_height
+            pixmap = _pil_to_qpixmap(text_image)
+            self._text_label.setPixmap(pixmap)
+            self._text_label.resize(pixmap.size())
+            if self._text_pos is not None:
+                x = int(min(max(self._text_pos[0] * cw, 0), max(cw - pixmap.width(), 0)))
+                y = int(min(max(self._text_pos[1] * ch, 0), max(ch - pixmap.height(), 0)))
+            else:
+                x = default_text_x
+                y = max(_PADDING, (ch - total_h) // 2)
+            self._text_label.move(max(x, 0), max(y, 0))
+            self._text_label.show()
+        else:
+            self._text_label.hide()

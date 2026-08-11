@@ -1,6 +1,7 @@
 """Compose the signature image (left) + signer name/date (right) into a
 single image, matching Adobe Acrobat's default layout when signing with a
-certificate.
+certificate - or, once image_pos/text_pos are set on the Appearance, an
+independently positioned/sized layout dragged out in the box editor.
 """
 from __future__ import annotations
 
@@ -72,6 +73,44 @@ def _wrap_line(line: str, font: ImageFont.ImageFont, max_width: float, draw: Ima
     return wrapped
 
 
+def fit_image(image_path: str, max_w: int, max_h: int) -> Image.Image:
+    """Loads image_path and resizes it (can enlarge past its native
+    resolution, not just shrink) to fit within max_w x max_h while
+    preserving aspect ratio. Shared by the real compose step and the box
+    editor's draggable preview, so a dragged/resized preview matches what
+    actually gets signed."""
+    signature = Image.open(image_path).convert("RGBA")
+    max_w, max_h = max(max_w, 1), max(max_h, 1)
+    fit = min(max_w / signature.width, max_h / signature.height)
+    new_size = (max(int(signature.width * fit), 1), max(int(signature.height * fit), 1))
+    return signature.resize(new_size, Image.LANCZOS)
+
+
+def layout_text(
+    text_lines: list[str], available_w: int, available_h: int, font_size_pt: int | None
+) -> tuple[list[str], ImageFont.ImageFont, int]:
+    """Word-wraps text_lines to fit available_w, picking a font size - fixed
+    (font_size_pt honored as-is) or auto-shrunk until the wrapped lines fit
+    available_h. Returns (wrapped_lines, font, line_height). Shared by the
+    real compose step and the box editor's draggable preview."""
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    if font_size_pt:
+        font_size = max(_MIN_FONT_SIZE, font_size_pt * _PX_PER_POINT)
+        font = _load_font(font_size)
+        wrapped_lines = [w for line in text_lines for w in _wrap_line(line, font, available_w, probe)]
+        return wrapped_lines, font, font_size + 4
+
+    font_size = max(9, min(int(available_h * 0.16), available_h // max(len(text_lines), 1) - 2))
+    while True:
+        font = _load_font(font_size)
+        wrapped_lines = [w for line in text_lines for w in _wrap_line(line, font, available_w, probe)]
+        line_height = font_size + 4
+        total_h = line_height * len(wrapped_lines)
+        if total_h <= available_h or font_size <= _MIN_FONT_SIZE:
+            return wrapped_lines, font, line_height
+        font_size -= 1
+
+
 def compose_appearance_image(
     image_path: str | None,
     text_lines: list[str],
@@ -79,69 +118,61 @@ def compose_appearance_image(
     box_height_pt: float,
     font_size_pt: int | None = None,
     image_scale: float = 1.0,
+    image_pos: tuple[float, float] | None = None,
+    text_pos: tuple[float, float] | None = None,
 ) -> Image.Image:
+    """image_pos (image center) / text_pos (text block top-left), each a
+    (x_frac, y_frac) of the box - None means "not positioned independently
+    yet", using the classic image-left/text-right split instead (see the
+    image_pos/text_pos docstring on the Appearance model)."""
     width = max(int(box_width_pt * _PX_PER_POINT), 120)
     height = max(int(box_height_pt * _PX_PER_POINT), 60)
     canvas = Image.new("RGBA", (width, height), (255, 255, 255, 0))
 
     has_image = bool(image_path)
-    left_width = int(width * _LEFT_RATIO) if has_image and text_lines else width
+    has_text = bool(text_lines)
+    custom_layout = image_pos is not None or text_pos is not None
+    # The left/right split only applies in the classic (non-custom) layout -
+    # once either element is independently positioned, each is free to use
+    # the whole box.
+    left_width = int(width * _LEFT_RATIO) if has_image and has_text and not custom_layout else width
 
     if has_image:
-        signature = Image.open(image_path).convert("RGBA")
-        # Scaled from the left region's fit-to-box size, but capped at the
-        # box's own interior - a large scale grows the image up to (and not
-        # past) the box edges, even if that means overlapping the text side.
-        base_max_w = left_width - 2 * _PADDING
-        base_max_h = height - 2 * _PADDING
         box_max_w = width - 2 * _PADDING
         box_max_h = height - 2 * _PADDING
-        max_w = max(min(int(base_max_w * image_scale), box_max_w), 1)
-        max_h = max(min(int(base_max_h * image_scale), box_max_h), 1)
-        # thumbnail() only ever shrinks - resize explicitly so image_scale
-        # can also enlarge past the source image's native resolution.
-        fit = min(max_w / signature.width, max_h / signature.height)
-        new_size = (max(int(signature.width * fit), 1), max(int(signature.height * fit), 1))
-        signature = signature.resize(new_size, Image.LANCZOS)
-        x = (left_width - signature.width) // 2
-        y = (height - signature.height) // 2
+        base_max_w = box_max_w if custom_layout else (left_width - 2 * _PADDING)
+        max_w = min(int(base_max_w * image_scale), box_max_w)
+        max_h = min(int(box_max_h * image_scale), box_max_h)
+        signature = fit_image(image_path, max_w, max_h)
+        if image_pos is not None:
+            cx, cy = image_pos[0] * width, image_pos[1] * height
+            x = int(min(max(cx - signature.width / 2, 0), width - signature.width))
+            y = int(min(max(cy - signature.height / 2, 0), height - signature.height))
+        else:
+            x = (left_width - signature.width) // 2
+            y = (height - signature.height) // 2
         canvas.paste(signature, (x, y), signature)
 
-    if text_lines:
+    if has_text:
         draw = ImageDraw.Draw(canvas)
-        text_x = (left_width + _PADDING) if has_image else _PADDING
-        available_w = max(width - text_x - _PADDING, 10)
+        default_text_x = (left_width + _PADDING) if has_image else _PADDING
+        available_w = (
+            max(width - 2 * _PADDING, 10) if text_pos is not None
+            else max(width - default_text_x - _PADDING, 10)
+        )
         available_h = height - 2 * _PADDING
+        wrapped_lines, font, line_height = layout_text(text_lines, available_w, available_h, font_size_pt)
+        total_h = line_height * len(wrapped_lines)
 
-        if font_size_pt:
-            # User picked a fixed size (in pt, same unit as the box) -
-            # honor it as-is, no shrink-to-fit.
-            font_size = max(_MIN_FONT_SIZE, font_size_pt * _PX_PER_POINT)
-            font = _load_font(font_size)
-            wrapped_lines = [
-                wrapped for line in text_lines for wrapped in _wrap_line(line, font, available_w, draw)
-            ]
-            line_height = font_size + 4
-            total_h = line_height * len(wrapped_lines)
+        if text_pos is not None:
+            x = int(min(max(text_pos[0] * width, 0), max(width - available_w - _PADDING, 0)))
+            y = int(min(max(text_pos[1] * height, 0), max(height - total_h, 0)))
         else:
-            font_size = max(9, min(int(height * 0.16), available_h // max(len(text_lines), 1) - 2))
-            # Word-wrap at the current font size, then shrink and re-wrap until
-            # the wrapped lines fit the box height (or we hit the size floor) -
-            # a box too narrow for "Signed by: ..." wraps instead of overflowing.
-            while True:
-                font = _load_font(font_size)
-                wrapped_lines = [
-                    wrapped for line in text_lines for wrapped in _wrap_line(line, font, available_w, draw)
-                ]
-                line_height = font_size + 4
-                total_h = line_height * len(wrapped_lines)
-                if total_h <= available_h or font_size <= _MIN_FONT_SIZE:
-                    break
-                font_size -= 1
+            x = default_text_x
+            y = max(_PADDING, (height - total_h) // 2)
 
-        y = max(_PADDING, (height - total_h) // 2)
         for line in wrapped_lines:
-            draw.text((text_x, y), line, fill=_TEXT_COLOR, font=font)
+            draw.text((x, y), line, fill=_TEXT_COLOR, font=font)
             y += line_height
 
     return canvas
