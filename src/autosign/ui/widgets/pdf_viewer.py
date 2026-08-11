@@ -190,6 +190,14 @@ class PdfViewerWidget(QWidget):
         # file, without the user needing to click into the viewer first.
         self._canvas.setFocus()
 
+    def release_file_handles(self) -> None:
+        """Closes the lazily-opened pdfium handle text selection/hover
+        keeps on the currently displayed page (see page_canvas.py's
+        PageTextSource) - callers need this before deleting/moving the
+        file it's pointed at, or Windows refuses with a file-in-use error.
+        Cheap to call even if nothing is actually open right now."""
+        self._canvas.close_text_source()
+
     def clear(self) -> None:
         self._pdf_path = None
         self._signed_path = None

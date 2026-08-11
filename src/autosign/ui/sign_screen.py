@@ -582,6 +582,10 @@ class SignScreen(QWidget):
         self._perform_move(source_file, signed_path, target, silent=False)
 
     def _perform_move(self, source_file: Path, signed_path: Path, target: Path, silent: bool) -> None:
+        # The viewer may still hold a pdfium handle open on signed_path for
+        # hover/text-selection (see PdfViewerWidget.release_file_handles) -
+        # Windows refuses to move/delete a file while that's open.
+        self._viewer.release_file_handles()
         try:
             destination = move_signed_file(signed_path, source_file, target)
         except MoveCollisionError as exc:
