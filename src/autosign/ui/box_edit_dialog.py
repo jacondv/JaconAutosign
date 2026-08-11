@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -144,6 +144,10 @@ class BoxEditDialog(QDialog):
         self._text_pos = appearance.text_pos if appearance else None
         self._image_size = appearance.image_size if appearance else None
         self._text_size = appearance.text_size if appearance else None
+        # No longer editable via UI (resize handles superseded it) - kept
+        # only so an older template's saved value still renders correctly
+        # until its image is resized via the handle.
+        self._image_scale = appearance.image_scale if appearance else 1.0
 
         self._label_edit = QLineEdit(label or "Signature")
         self._label_edit.textChanged.connect(self._refresh_preview)
@@ -152,16 +156,14 @@ class BoxEditDialog(QDialog):
         browse_btn = QPushButton("Choose signature image (.png)...")
         browse_btn.clicked.connect(self._browse_image)
 
-        self._image_scale_spin = QDoubleSpinBox()
-        self._image_scale_spin.setRange(0.2, 3.0)
-        self._image_scale_spin.setSingleStep(0.1)
-        self._image_scale_spin.setSuffix("x")
-        self._image_scale_spin.setValue(appearance.image_scale if appearance else 1.0)
-        self._image_scale_spin.setToolTip(
-            "Used until the image is resized by dragging its corner handle\n"
-            "in the preview - after that, the dragged size takes over."
+        self._font_size_spin = QSpinBox()
+        self._font_size_spin.setRange(0, 72)
+        self._font_size_spin.setSpecialValueText("Auto")
+        self._font_size_spin.setValue(appearance.font_size if appearance and appearance.font_size else 0)
+        self._font_size_spin.setToolTip(
+            "Font size (pt) for the text. 0 = auto (shrinks to fit its box)."
         )
-        self._image_scale_spin.valueChanged.connect(self._refresh_preview)
+        self._font_size_spin.valueChanged.connect(self._refresh_preview)
 
         # Default appearance: signature image on the left, "Signed by: <name>
         # / Date: <date>" on the right (Acrobat's default layout) - no extra
@@ -185,12 +187,12 @@ class BoxEditDialog(QDialog):
         image_row.addWidget(self._image_path_label, 1)
         image_row.addWidget(browse_btn)
         form.addRow("Signature image:", image_row)
-        form.addRow("Image size:", self._image_scale_spin)
         form.addRow(
             "", QLabel("Default appearance: signature image (left) + Signed by/Date (right)")
         )
         form.addRow("", self._show_text_check)
         form.addRow("Custom text template:", self._text_template_edit)
+        form.addRow("Font size:", self._font_size_spin)
         form.addRow("", reset_position_btn)
 
         canvas_w, canvas_h = self._preview_canvas_size()
@@ -272,11 +274,12 @@ class BoxEditDialog(QDialog):
             image_path=self._image_path,
             show_text=self._show_text_check.isChecked(),
             text_template=self._text_template_edit.text() if self._show_text_check.isChecked() else None,
-            image_scale=self._image_scale_spin.value(),
+            image_scale=self._image_scale,
             image_pos=self._image_pos,
             text_pos=self._text_pos,
             image_size=self._image_size,
             text_size=self._text_size,
+            font_size=self._font_size_spin.value() or None,
         )
 
     # -------------------------------------------------------------- preview
@@ -379,7 +382,9 @@ class BoxEditDialog(QDialog):
             else:
                 avail_w = max(cw - default_text_x - _PADDING, 10)
                 avail_h = ch - 2 * _PADDING
-            wrapped_lines, font, line_height = layout_text(text_lines, avail_w, avail_h, None)
+            wrapped_lines, font, line_height = layout_text(
+                text_lines, avail_w, avail_h, appearance.font_size
+            )
             total_h = line_height * len(wrapped_lines)
             # Once resized, the box IS the dragged bounding rect (so the
             # handle stays where it was left); otherwise it hugs the actual

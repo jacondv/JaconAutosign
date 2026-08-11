@@ -18,7 +18,6 @@ def render_appearance_preview(
     width_pt: float,
     height_pt: float,
     signer_name: str,
-    font_size_pt: int | None = None,
 ) -> QPixmap | None:
     """A pixmap of one appearance (image + text) at its real box
     proportions - the shared renderer behind both the Settings template
@@ -32,7 +31,7 @@ def render_appearance_preview(
         text_lines,
         width_pt,
         height_pt,
-        font_size_pt,
+        appearance.font_size,
         appearance.image_scale,
         appearance.image_pos,
         appearance.text_pos,
@@ -45,14 +44,10 @@ def render_appearance_preview(
     return QPixmap.fromImage(qimage.copy())  # copy: detach from the bytes buffer above
 
 
-def render_template_preview(
-    template: Template, signer_name: str, font_size_pt: int | None = None
-) -> QPixmap | None:
+def render_template_preview(template: Template, signer_name: str) -> QPixmap | None:
     """A pixmap of the first signature box's appearance, at its real
     proportions. None if the template has no signature boxes yet."""
     if not template.signature_boxes:
         return None
     box = template.signature_boxes[0]
-    return render_appearance_preview(
-        box.appearance, box.rect.width, box.rect.height, signer_name, font_size_pt
-    )
+    return render_appearance_preview(box.appearance, box.rect.width, box.rect.height, signer_name)

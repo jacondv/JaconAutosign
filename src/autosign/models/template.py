@@ -88,6 +88,9 @@ class Appearance:
     # falling back to image_scale / the classic split, same as image_pos.
     image_size: Optional[tuple] = None
     text_size: Optional[tuple] = None
+    # Font size in pt for the text, set per-box in the box editor.
+    # None/0 = auto (shrinks to fit the text's box).
+    font_size: Optional[int] = None
 
     def to_dict(self) -> dict:
         return {
@@ -99,6 +102,7 @@ class Appearance:
             "text_pos": list(self.text_pos) if self.text_pos else None,
             "image_size": list(self.image_size) if self.image_size else None,
             "text_size": list(self.text_size) if self.text_size else None,
+            "font_size": self.font_size,
         }
 
     @staticmethod
@@ -116,6 +120,7 @@ class Appearance:
             text_pos=tuple(text_pos) if text_pos else None,
             image_size=tuple(image_size) if image_size else None,
             text_size=tuple(text_size) if text_size else None,
+            font_size=data.get("font_size") or None,
         )
 
 

@@ -46,11 +46,9 @@ class SigningEngine:
         self,
         cert_provider: CertificateProvider,
         signer_display_name: str = "",
-        font_size_pt: int | None = None,
     ):
         self._cert_provider = cert_provider
         self._signer_display_name = signer_display_name
-        self._font_size_pt = font_size_pt
 
     def sign_file(
         self,
@@ -154,7 +152,7 @@ class SigningEngine:
             text_lines,
             rect.width,
             rect.height,
-            self._font_size_pt,
+            box.appearance.font_size,
             box.appearance.image_scale,
             box.appearance.image_pos,
             box.appearance.text_pos,
