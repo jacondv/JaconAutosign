@@ -21,6 +21,7 @@ from pyhanko import stamp
 from pyhanko.pdf_utils import images
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields, signers
+from pypdf import PdfReader, PdfWriter
 
 from ..models import Rect, SignatureBox, SignPageScope, Template
 from .appearance_compose import build_text_lines, compose_appearance_image
@@ -80,12 +81,17 @@ class SigningEngine:
 
         try:
             pdf_bytes = pdf_info.path.read_bytes()
-            for box_num, box in enumerate(boxes, start=1):
-                for page_index in pages_to_sign:
-                    field_name = f"Sig{box_num}_p{page_index + 1}"
-                    pdf_bytes = self._apply_one_field(
-                        pdf_bytes, pdf_info, box, page_index, field_name, sign_time
-                    )
+            try:
+                pdf_bytes = self._apply_all_fields(pdf_bytes, pdf_info, boxes, pages_to_sign, sign_time)
+            except Exception:
+                # Some PDFs have malformed low-level objects (e.g. a
+                # /Metadata stream missing its /Length) that pypdfium2
+                # tolerates when inspecting the file but pyHanko's stricter
+                # reader can't - repair once and retry before giving up.
+                repaired = self._repair_pdf_bytes(pdf_bytes)
+                if repaired is None:
+                    raise
+                pdf_bytes = self._apply_all_fields(repaired, pdf_info, boxes, pages_to_sign, sign_time)
         except SigningError:
             raise
         except Exception as exc:  # pyHanko/PIL can raise several different error types
@@ -107,6 +113,36 @@ class SigningEngine:
                 f"Could not write {output_path.name} - it may be open in another "
                 f"program (e.g. a PDF viewer). Close it and try signing again. ({exc})"
             ) from exc
+
+    def _apply_all_fields(
+        self,
+        pdf_bytes: bytes,
+        pdf_info: PdfInfo,
+        boxes: list[SignatureBox],
+        pages_to_sign: list[int],
+        sign_time: datetime,
+    ) -> bytes:
+        for box_num, box in enumerate(boxes, start=1):
+            for page_index in pages_to_sign:
+                field_name = f"Sig{box_num}_p{page_index + 1}"
+                pdf_bytes = self._apply_one_field(pdf_bytes, pdf_info, box, page_index, field_name, sign_time)
+        return pdf_bytes
+
+    @staticmethod
+    def _repair_pdf_bytes(pdf_bytes: bytes) -> bytes | None:
+        """Re-saves the PDF through pypdf's own (more lenient) reader/writer,
+        which normalizes low-level object structure - recomputed stream
+        /Length values, deduplicated dictionary keys, etc. None if pypdf
+        can't read the file either, so the original error still surfaces."""
+        try:
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+            writer = PdfWriter()
+            writer.append(reader)
+            buf = io.BytesIO()
+            writer.write(buf)
+            return buf.getvalue()
+        except Exception:
+            return None
 
     def _apply_one_field(
         self,
