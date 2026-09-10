@@ -9,6 +9,7 @@ from .project_folder_service import (
     list_sibling_folders,
     move_signed_file,
 )
+from .signing_history_service import HistoryEntry, SigningHistoryService
 
 __all__ = [
     "TemplateService",
@@ -23,4 +24,6 @@ __all__ = [
     "find_matching_project_folder",
     "list_sibling_folders",
     "move_signed_file",
+    "HistoryEntry",
+    "SigningHistoryService",
 ]

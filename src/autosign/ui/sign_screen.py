@@ -30,7 +30,14 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import SignPageScope
-from ..services import PdfInfo, PdfInspectService, SettingsService, TemplateService, get_signed_pages
+from ..services import (
+    PdfInfo,
+    PdfInspectService,
+    SettingsService,
+    SigningHistoryService,
+    TemplateService,
+    get_signed_pages,
+)
 from ..services.batch_sign_service import BatchSignService
 from ..services.pdf_inspect_service import PdfInspectError
 from ..services.project_folder_service import (
@@ -72,12 +79,14 @@ class SignScreen(QWidget):
         template_service: TemplateService,
         pdf_inspect_service: PdfInspectService,
         settings_service: SettingsService,
+        history_service: SigningHistoryService,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self._templates = template_service
         self._pdf_inspect = pdf_inspect_service
         self._settings_service = settings_service
+        self._history = history_service
 
         self._results: dict[Path, object] = {}
         self._project_folder_cache: dict[Path, list[Path]] = {}
@@ -579,8 +588,21 @@ class SignScreen(QWidget):
         siblings = self._sibling_folders(result.file_path.parent)
         target = find_matching_project_folder(result.file_path, siblings)
         if target is None:
+            self._discard_source_without_move(result.file_path, result.output_path)
             return
         self._perform_move(result.file_path, result.output_path, target, silent=True)
+
+    def _discard_source_without_move(self, source_file: Path, output_path: Path) -> None:
+        """No project folder matched, so there's nowhere to file the signed
+        copy - it just stays in the output folder. The stale, not-yet-signed
+        original next to it is still cleaned up though, same as a
+        successful auto-move would have done."""
+        try:
+            if source_file.exists() and source_file.resolve() != output_path.resolve():
+                source_file.unlink()
+        except OSError:
+            pass  # best-effort - leaving the original behind is harmless
+        self._history.record_or_update(source_file.name, "No matching folder - kept in output folder")
 
     def _manual_move_current_file(self) -> None:
         source_file = self._current_file
@@ -630,6 +652,7 @@ class SignScreen(QWidget):
 
         self._results.pop(source_file, None)
         self._file_panel.remove_paths([source_file])  # also clears the viewer if it was open
+        self._history.record_or_update(source_file.name, f"Moved to {target.name}")
         if silent:
             self._control_panel.set_summary(f"Moved {destination.name} → {target.name}\\")
         else:

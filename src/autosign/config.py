@@ -24,3 +24,7 @@ def templates_dir() -> Path:
 
 def settings_file() -> Path:
     return app_data_dir() / "settings.json"
+
+
+def history_file() -> Path:
+    return app_data_dir() / "signing_history.json"

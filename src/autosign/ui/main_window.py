@@ -17,9 +17,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config import settings_file, templates_dir
-from ..services import PdfInspectService, SettingsService, TemplateService
+from ..config import history_file, settings_file, templates_dir
+from ..services import PdfInspectService, SettingsService, SigningHistoryService, TemplateService
 from . import theme
+from .history_screen import HistoryScreen
 from .settings_screen import SettingsScreen
 from .sign_screen import SignScreen, ViewerStatus
 from .template_designer import TemplateDesignerScreen
@@ -40,12 +41,13 @@ class MainWindow(QMainWindow):
         self._template_service = TemplateService(templates_dir())
         self._pdf_inspect = PdfInspectService()
         self._settings_service = SettingsService(settings_file())
+        self._history_service = SigningHistoryService(history_file())
 
         self._outer_stack = QStackedWidget()
         self.setCentralWidget(self._outer_stack)
 
         self._sign_screen = SignScreen(
-            self._template_service, self._pdf_inspect, self._settings_service
+            self._template_service, self._pdf_inspect, self._settings_service, self._history_service
         )
         self._sign_screen.set_canvas_backdrop_color(
             QColor(theme.palette_for(initial_theme).canvas_backdrop)
@@ -58,9 +60,12 @@ class MainWindow(QMainWindow):
         self._settings_screen.theme_changed.connect(self._apply_theme)
         self._sign_screen.current_file_changed.connect(self._update_title)
 
+        self._history_screen = HistoryScreen(self._history_service)
+
         self._content_stack = QStackedWidget()
         self._content_stack.addWidget(self._sign_screen)
         self._content_stack.addWidget(self._settings_screen)
+        self._content_stack.addWidget(self._history_screen)
 
         self._ribbon = RibbonBar(theme_mode=initial_theme)
         self._wire_ribbon()
@@ -137,6 +142,8 @@ class MainWindow(QMainWindow):
         r = self._ribbon
         r.home_activated.connect(lambda: self._content_stack.setCurrentIndex(0))
         r.settings_activated.connect(lambda: self._content_stack.setCurrentIndex(1))
+        r.history_activated.connect(lambda: self._content_stack.setCurrentIndex(2))
+        r.history_activated.connect(self._history_screen.refresh)
         r.open_files_requested.connect(self._sign_screen.open_files)
         r.open_folder_requested.connect(self._sign_screen.open_folder)
         r.prev_page_requested.connect(self._sign_screen.prev_page)

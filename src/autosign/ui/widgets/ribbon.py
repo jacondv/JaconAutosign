@@ -43,6 +43,7 @@ IconFactory = Callable[..., QIcon]
 class RibbonBar(QWidget):
     home_activated = Signal()
     settings_activated = Signal()
+    history_activated = Signal()
 
     open_files_requested = Signal()
     open_folder_requested = Signal()
@@ -86,11 +87,14 @@ class RibbonBar(QWidget):
         tab_row.setSpacing(0)
         self._home_tab_btn = self._tab_button("Home")
         self._settings_tab_btn = self._tab_button("Settings")
+        self._history_tab_btn = self._tab_button("History")
         self._home_tab_btn.setChecked(True)
         self._home_tab_btn.clicked.connect(lambda: self.setCurrentIndex(0))
         self._settings_tab_btn.clicked.connect(lambda: self.setCurrentIndex(1))
+        self._history_tab_btn.clicked.connect(lambda: self.setCurrentIndex(2))
         tab_row.addWidget(self._home_tab_btn)
         tab_row.addWidget(self._settings_tab_btn)
+        tab_row.addWidget(self._history_tab_btn)
         tab_row.addStretch(1)
 
         self._content_stack = QStackedWidget()
@@ -98,6 +102,7 @@ class RibbonBar(QWidget):
         self._content_stack.setFixedHeight(_STRIP_HEIGHT)
         self._content_stack.addWidget(self._build_home_strip())
         self._content_stack.addWidget(self._build_settings_strip())
+        self._content_stack.addWidget(self._build_history_strip())
 
         root.addWidget(tab_bar)
         root.addWidget(self._content_stack)
@@ -114,9 +119,11 @@ class RibbonBar(QWidget):
 
     # -------------------------------------------------------------- tabs
     def setCurrentIndex(self, index: int) -> None:
-        (self._home_tab_btn if index == 0 else self._settings_tab_btn).setChecked(True)
+        buttons = (self._home_tab_btn, self._settings_tab_btn, self._history_tab_btn)
+        signals = (self.home_activated, self.settings_activated, self.history_activated)
+        buttons[index].setChecked(True)
         self._content_stack.setCurrentIndex(index)
-        (self.home_activated if index == 0 else self.settings_activated).emit()
+        signals[index].emit()
 
     def currentIndex(self) -> int:
         return self._content_stack.currentIndex()
@@ -223,6 +230,17 @@ class RibbonBar(QWidget):
         row = QHBoxLayout(strip)
         row.setContentsMargins(8, 4, 8, 4)
         hint = QLabel("Configure the signing certificate, signer name, output folder, and templates below.")
+        hint.setObjectName("ribbonStatusLabel")
+        hint.setWordWrap(True)
+        row.addWidget(hint, 1)
+        return strip
+
+    # ----------------------------------------------------------------- History
+    def _build_history_strip(self) -> QWidget:
+        strip = QWidget()
+        row = QHBoxLayout(strip)
+        row.setContentsMargins(8, 4, 8, 4)
+        hint = QLabel("The last 100 signed files - click a column header to sort.")
         hint.setObjectName("ribbonStatusLabel")
         hint.setWordWrap(True)
         row.addWidget(hint, 1)
