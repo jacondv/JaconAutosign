@@ -91,6 +91,9 @@ cộng dồn của nhiều lần ký từng trang) thì mới coi là "xong" và
 auto-move. Ký dở (chưa đủ trang) thì bỏ qua, để dành cho nút Move thủ công.
 
 ### 2. Quy tắc khớp folder (`find_matching_project_folder`)
+Thử lần lượt 2 quy tắc, dùng quy tắc nào tìm được kết quả trước:
+
+**Quy tắc 1 — mã số đầu tên file** (`_match_by_leading_digits`):
 1. Lấy **số ở đầu tên file** (regex `^(\d+)`), ví dụ `1304-XYZ.pdf` → `"1304"`.
 2. Duyệt các folder con **cùng cấp với file gốc** (cùng thư mục cha), lấy
    số ở đầu tên mỗi folder, ví dụ `1304-Electrical` → `"1304"` (4 chữ số),
@@ -99,8 +102,19 @@ auto-move. Ký dở (chưa đủ trang) thì bỏ qua, để dành cho nút Move
    tên file: folder 2 số → so 2 số đầu file; folder 4 số → so 4 số đầu file.
 4. Chỉ nhận kết quả khi có **đúng 1 folder khớp**. Nếu không folder nào
    khớp, hoặc khớp nhiều hơn 1 (kể cả khớp ở độ dài số khác nhau, ví dụ
-   file vừa khớp folder 2 số vừa khớp folder 4 số) → coi là mơ hồ, **không
-   tự động**, trả về `None`.
+   file vừa khớp folder 2 số vừa khớp folder 4 số) → coi là mơ hồ, quy tắc
+   này trả về `None` (thử tiếp quy tắc 2).
+
+**Quy tắc 2 — tên folder xuất hiện trong tên file** (`_match_by_name_substring`),
+áp dụng cho các file không bắt đầu bằng số (không khớp quy tắc 1):
+1. Duyệt các folder con cùng cấp, giữ lại folder nào có **tên folder xuất
+   hiện như 1 cụm con trong tên file** (so sánh không phân biệt hoa/thường).
+   Ví dụ `JSA-T43US-A.pdf` chứa cụm `T43US` → khớp folder `T43US`.
+2. Nếu có nhiều folder cùng khớp, chọn folder có **tên dài nhất** (khớp cụ
+   thể hơn). Ví dụ `JSV6-EMU-ABCD.pdf` khớp cả folder `JSV6` và
+   `JSV6-EMU` → chọn `JSV6-EMU` vì tên dài hơn.
+3. Nếu không folder nào khớp, hoặc nhiều folder cùng khớp và cùng tên dài
+   nhất (không phân biệt được) → mơ hồ, trả về `None` → không tự động.
 
 ### 3. Thực hiện move (`move_signed_file`)
 - Move file đã ký (từ `Signed_<tên>\...`) vào folder dự án đã khớp, giữ

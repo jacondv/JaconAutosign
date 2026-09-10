@@ -18,19 +18,34 @@ def _leading_digits(name: str) -> str | None:
 
 
 def find_matching_project_folder(source_file: Path) -> Path | None:
-    """A sibling folder of source_file whose name starts with as many
-    leading digits as the FOLDER's own leading digits, e.g. a 2-digit
-    folder "12. Chassis" matches "12-report.pdf" on "12"; a 4-digit folder
-    "1304-Electrical" matches "1304-report.pdf" on "1304". None if the
-    file has no leading digits, no folder matches, or more than one does
+    """Finds the sibling folder source_file belongs in, trying two rules
+    in order:
+
+    1. Leading-digit code (_match_by_leading_digits): a sibling folder
+       whose name starts with as many leading digits as the FOLDER's own
+       leading digits, e.g. a 2-digit folder "12. Chassis" matches
+       "12-report.pdf" on "12"; a 4-digit folder "1304-Electrical" matches
+       "1304-report.pdf" on "1304".
+    2. Folder-name substring (_match_by_name_substring), for files that
+       don't start with digits at all, e.g. "JSA-T43US-A.pdf" matches a
+       sibling folder "T43US"; "JSV6-EMU-ABCD.pdf" prefers "JSV6-EMU" over
+       a shorter "JSV6" also found among the siblings.
+
+    Each rule returns None if it finds no match or more than one
     (ambiguous - left for the user to resolve with the manual move
     instead of guessing)."""
-    file_digits = _leading_digits(source_file.stem)
-    if not file_digits:
-        return None
     try:
         siblings = [p for p in source_file.parent.iterdir() if p.is_dir()]
     except OSError:
+        return None
+    return _match_by_leading_digits(source_file, siblings) or _match_by_name_substring(
+        source_file, siblings
+    )
+
+
+def _match_by_leading_digits(source_file: Path, siblings: list[Path]) -> Path | None:
+    file_digits = _leading_digits(source_file.stem)
+    if not file_digits:
         return None
     matches = []
     for folder in siblings:
@@ -41,6 +56,16 @@ def find_matching_project_folder(source_file: Path) -> Path | None:
         if len(file_digits) >= n and file_digits[:n] == folder_digits:
             matches.append(folder)
     return matches[0] if len(matches) == 1 else None
+
+
+def _match_by_name_substring(source_file: Path, siblings: list[Path]) -> Path | None:
+    stem = source_file.stem.lower()
+    matches = [folder for folder in siblings if folder.name.lower() in stem]
+    if not matches:
+        return None
+    longest = max(len(folder.name) for folder in matches)
+    best = [folder for folder in matches if len(folder.name) == longest]
+    return best[0] if len(best) == 1 else None
 
 
 class MoveCollisionError(Exception):
