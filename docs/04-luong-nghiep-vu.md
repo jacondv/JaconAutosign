@@ -60,6 +60,73 @@
   trong thư mục output" ở giai đoạn sau — xem câu hỏi mở)
 ```
 
+## Luồng D — Tự động chuyển file đã ký vào folder dự án (đã cài đặt)
+
+> Code: `src/autosign/services/project_folder_service.py` (quy tắc khớp
+> folder + hàm move) và `src/autosign/ui/sign_screen.py` (nơi gọi vào,
+> phương thức `_auto_move_if_matched`, `_manual_move_current_file`,
+> `_perform_move`, `_is_fully_signed`).
+
+### Bối cảnh
+File PDF cần ký thường nằm chung thư mục (inbox) với các folder dự án đã
+đánh số, ví dụ:
+
+```
+Downloads\2\
+    1304-XYZ.pdf
+    1304-Electrical\      (folder dự án)
+    12. Chassic\          (folder dự án khác)
+```
+
+Sau khi ký xong, thay vì để file nằm trong `Signed_<tên>\` (hoặc folder
+output tuỳ chỉnh), ứng dụng tự động "file" nó vào đúng folder dự án tương
+ứng và dọn file gốc chưa ký đi.
+
+### 1. Khi nào tự động chạy (không cần xác nhận)
+Sau **mỗi lần ký xong 1 file** (`SignScreen._on_progress`), ứng dụng kiểm
+tra `_is_fully_signed(output_path)`: so `get_signed_pages(output_path)`
+với tổng số trang của file. Chỉ khi **toàn bộ trang đã có chữ ký** (bất kể
+lần ký này dùng scope "Current/First/Last/All page" — có thể là kết quả
+cộng dồn của nhiều lần ký từng trang) thì mới coi là "xong" và kích hoạt
+auto-move. Ký dở (chưa đủ trang) thì bỏ qua, để dành cho nút Move thủ công.
+
+### 2. Quy tắc khớp folder (`find_matching_project_folder`)
+1. Lấy **số ở đầu tên file** (regex `^(\d+)`), ví dụ `1304-XYZ.pdf` → `"1304"`.
+2. Duyệt các folder con **cùng cấp với file gốc** (cùng thư mục cha), lấy
+   số ở đầu tên mỗi folder, ví dụ `1304-Electrical` → `"1304"` (4 chữ số),
+   `12. Chassic` → `"12"` (2 chữ số).
+3. Độ dài số của **folder** quyết định so khớp bao nhiêu chữ số đầu của
+   tên file: folder 2 số → so 2 số đầu file; folder 4 số → so 4 số đầu file.
+4. Chỉ nhận kết quả khi có **đúng 1 folder khớp**. Nếu không folder nào
+   khớp, hoặc khớp nhiều hơn 1 (kể cả khớp ở độ dài số khác nhau, ví dụ
+   file vừa khớp folder 2 số vừa khớp folder 4 số) → coi là mơ hồ, **không
+   tự động**, trả về `None`.
+
+### 3. Thực hiện move (`move_signed_file`)
+- Move file đã ký (từ `Signed_<tên>\...`) vào folder dự án đã khớp, giữ
+  nguyên tên file.
+- Xoá file PDF gốc (chưa ký) ở thư mục inbox — vì đã "chuyển chỗ" xong.
+- Nếu trong folder đích đã có sẵn file trùng tên → không tự ghi đè, ném
+  `MoveCollisionError`; UI hỏi người dùng Overwrite hay bỏ qua.
+- Trước khi move, gọi `PdfViewerWidget.release_file_handles()` để đóng
+  handle pdfium mà khung xem (hover/chọn text) có thể đang giữ mở trên
+  chính file đó — tránh lỗi Windows "file đang được sử dụng" (WinError 32).
+
+### 4. Thông báo
+- Auto-move (im lặng phần lớn): chỉ hiện dòng trạng thái ngắn dạng
+  `Moved <tên file> → <tên folder>\` ở khu vực tóm tắt (`SignControlPanel.set_summary`),
+  không có hộp thoại xác nhận — **trừ khi trùng tên** thì mới hỏi.
+- Move thủ công: xác nhận xong hiện hộp thoại thông báo đã move.
+
+### 5. Nút "Move" thủ công
+Nằm cạnh Remove/Reset/Clear trong danh sách file, tác động lên **file
+đang mở** (không phải file đang chọn nhiều), dùng cho các file ký dở dang
+(không rơi vào auto-move ở mục 1):
+1. Kiểm tra file đã có output đã ký chưa — chưa có thì báo và dừng.
+2. Áp dụng quy tắc khớp folder ở mục 2.
+3. Không tìm được folder khớp → mở hộp thoại chọn thư mục đích thủ công.
+4. Move theo đúng cơ chế ở mục 3 (kể cả xử lý trùng tên).
+
 ## Mô tả màn hình (wireframe dạng mô tả, chưa phải thiết kế UI cuối cùng)
 
 ### Màn hình 1 — Trang chủ
