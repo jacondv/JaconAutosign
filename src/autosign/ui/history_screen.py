@@ -5,6 +5,11 @@ code paths.
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -19,6 +24,8 @@ from PySide6.QtWidgets import (
 )
 
 from ..services import SigningHistoryService
+
+_NO_MATCH_SUFFIX = " (no matching folder)"
 
 _COL_INDEX = 0
 _COL_TIME = 1
@@ -74,6 +81,7 @@ class HistoryScreen(QWidget):
         # not after it - renumbering right away would read the pre-sort
         # row order.
         header.sortIndicatorChanged.connect(lambda *_: QTimer.singleShot(0, self._renumber_rows))
+        self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         layout.addWidget(self._table, 1)
 
     def refresh(self) -> None:
@@ -99,6 +107,30 @@ class HistoryScreen(QWidget):
             item = self._table.item(row, _COL_INDEX)
             if item is not None:
                 item.setText(str(row + 1))
+
+    def _on_cell_double_clicked(self, row: int, column: int) -> None:
+        if column not in (_COL_SOURCE, _COL_DESTINATION):
+            return
+        item = self._table.item(row, column)
+        if item is None:
+            return
+        text = item.text()
+        if text.endswith(_NO_MATCH_SUFFIX):
+            text = text[: -len(_NO_MATCH_SUFFIX)]
+        folder = Path(text)
+        if not folder.is_dir():
+            QMessageBox.information(self, "Folder not found", f"'{folder}' no longer exists.")
+            return
+        self._open_in_os(folder)
+
+    @staticmethod
+    def _open_in_os(path: Path) -> None:
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # noqa: S606 (opens the folder with Explorer)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", str(path)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(path)], check=False)
 
     def _on_clear_clicked(self) -> None:
         if self._table.rowCount() == 0:
