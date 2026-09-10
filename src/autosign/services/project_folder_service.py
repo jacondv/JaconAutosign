@@ -17,7 +17,20 @@ def _leading_digits(name: str) -> str | None:
     return match.group(1) if match else None
 
 
-def find_matching_project_folder(source_file: Path) -> Path | None:
+def list_sibling_folders(parent: Path) -> list[Path]:
+    """Subfolders directly under `parent`. Callers signing several files
+    from the same folder should list this once and pass it to every
+    find_matching_project_folder() call instead of letting each call
+    re-scan the same directory."""
+    try:
+        return [p for p in parent.iterdir() if p.is_dir()]
+    except OSError:
+        return []
+
+
+def find_matching_project_folder(
+    source_file: Path, siblings: list[Path] | None = None
+) -> Path | None:
     """Finds the sibling folder source_file belongs in, trying two rules
     in order:
 
@@ -33,11 +46,14 @@ def find_matching_project_folder(source_file: Path) -> Path | None:
 
     Each rule returns None if it finds no match or more than one
     (ambiguous - left for the user to resolve with the manual move
-    instead of guessing)."""
-    try:
-        siblings = [p for p in source_file.parent.iterdir() if p.is_dir()]
-    except OSError:
-        return None
+    instead of guessing).
+
+    `siblings` is the list of candidate folders (source_file.parent's
+    subfolders) - pass it in when matching several files from the same
+    folder to avoid re-scanning the directory for each one. Defaults to
+    scanning source_file.parent when omitted."""
+    if siblings is None:
+        siblings = list_sibling_folders(source_file.parent)
     return _match_by_leading_digits(source_file, siblings) or _match_by_name_substring(
         source_file, siblings
     )

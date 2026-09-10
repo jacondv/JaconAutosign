@@ -36,6 +36,7 @@ from ..services.pdf_inspect_service import PdfInspectError
 from ..services.project_folder_service import (
     MoveCollisionError,
     find_matching_project_folder,
+    list_sibling_folders,
     move_signed_file,
 )
 from ..signing import CertificateLoadError, Pkcs12CertificateProvider, SigningEngine
@@ -79,6 +80,7 @@ class SignScreen(QWidget):
         self._settings_service = settings_service
 
         self._results: dict[Path, object] = {}
+        self._project_folder_cache: dict[Path, list[Path]] = {}
         self._current_file: Path | None = None
         self._current_pdf_info: PdfInfo | None = None
         self._current_signed_pages: set[int] = set()
@@ -563,8 +565,19 @@ class SignScreen(QWidget):
             return False
         return info.page_count > 0 and len(get_signed_pages(output_path)) >= info.page_count
 
+    def _sibling_folders(self, parent: Path) -> list[Path]:
+        # Batch signing moves many files out of the same inbox folder in a
+        # row - cache its subfolder listing instead of re-scanning the
+        # directory for every single file.
+        cached = self._project_folder_cache.get(parent)
+        if cached is None:
+            cached = list_sibling_folders(parent)
+            self._project_folder_cache[parent] = cached
+        return cached
+
     def _auto_move_if_matched(self, result) -> None:
-        target = find_matching_project_folder(result.file_path)
+        siblings = self._sibling_folders(result.file_path.parent)
+        target = find_matching_project_folder(result.file_path, siblings)
         if target is None:
             return
         self._perform_move(result.file_path, result.output_path, target, silent=True)
@@ -580,7 +593,8 @@ class SignScreen(QWidget):
                 self, "Not signed yet", f"{source_file.name} has no signed output yet."
             )
             return
-        target = find_matching_project_folder(source_file)
+        siblings = self._sibling_folders(source_file.parent)
+        target = find_matching_project_folder(source_file, siblings)
         if target is None:
             chosen = QFileDialog.getExistingDirectory(
                 self, "Choose destination folder", str(source_file.parent)
