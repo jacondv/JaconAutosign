@@ -602,7 +602,9 @@ class SignScreen(QWidget):
                 source_file.unlink()
         except OSError:
             pass  # best-effort - leaving the original behind is harmless
-        self._history.record_or_update(source_file.name, "No matching folder - kept in output folder")
+        self._history.record_or_update(
+            source_file.name, str(source_file.parent), f"{output_path.parent} (no matching folder)"
+        )
 
     def _manual_move_current_file(self) -> None:
         source_file = self._current_file
@@ -652,7 +654,7 @@ class SignScreen(QWidget):
 
         self._results.pop(source_file, None)
         self._file_panel.remove_paths([source_file])  # also clears the viewer if it was open
-        self._history.record_or_update(source_file.name, f"Moved to {target.name}")
+        self._history.record_or_update(source_file.name, str(source_file.parent), str(target))
         if silent:
             self._control_panel.set_summary(f"Moved {destination.name} → {target.name}\\")
         else:

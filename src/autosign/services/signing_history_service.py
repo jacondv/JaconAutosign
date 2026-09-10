@@ -18,7 +18,8 @@ _MAX_ENTRIES = 100
 class HistoryEntry:
     signed_at: str  # ISO 8601, local time - also sorts correctly as plain text
     file_name: str
-    result: str  # destination folder name, or a fixed note if nothing matched
+    source_dir: str  # full path of the folder the original file was signed from
+    destination: str  # full path of the folder the signed copy ended up in
 
 
 class SigningHistoryService:
@@ -40,23 +41,27 @@ class SigningHistoryService:
             encoding="utf-8",
         )
 
-    def record_or_update(self, file_name: str, result: str) -> None:
+    def record_or_update(self, file_name: str, source_dir: str, destination: str) -> None:
         """Adds a new history row for a just-finished file, or - if a row
         for this file name is already there (e.g. it was auto-filed with
         "no matching folder" earlier and the user just moved it manually
-        afterwards) - updates that row's result in place instead of adding
-        a duplicate. Keeps at most the most recent _MAX_ENTRIES rows."""
+        afterwards) - updates that row's destination in place instead of
+        adding a duplicate. Keeps at most the most recent _MAX_ENTRIES rows."""
         entries = self.load()
         for entry in reversed(entries):
             if entry.file_name == file_name:
-                entry.result = result
+                entry.destination = destination
                 self._save(entries)
                 return
         entries.append(
             HistoryEntry(
                 signed_at=datetime.now().astimezone().isoformat(timespec="seconds"),
                 file_name=file_name,
-                result=result,
+                source_dir=source_dir,
+                destination=destination,
             )
         )
         self._save(entries[-_MAX_ENTRIES:])
+
+    def clear(self) -> None:
+        self._save([])
