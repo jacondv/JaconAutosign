@@ -33,7 +33,20 @@ class SigningHistoryService:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return []
-        return [HistoryEntry(**item) for item in data if isinstance(item, dict)]
+        entries = []
+        known_fields = HistoryEntry.__dataclass_fields__.keys()
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            # Older versions logged a single free-text "result" note instead
+            # of source_dir/destination - drop those unknown rows rather
+            # than letting one bad entry (a stale field name) blank out the
+            # whole tab.
+            try:
+                entries.append(HistoryEntry(**{k: v for k, v in item.items() if k in known_fields}))
+            except TypeError:
+                continue
+        return entries
 
     def _save(self, entries: list[HistoryEntry]) -> None:
         self._path.write_text(

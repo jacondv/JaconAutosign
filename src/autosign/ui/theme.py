@@ -225,6 +225,28 @@ QScrollBar::add-line, QScrollBar::sub-line {{
     height: 0px;
     width: 0px;
 }}
+QTableWidget {{
+    background: {p.bg_input};
+    alternate-background-color: {p.bg_panel};
+    gridline-color: {p.border};
+    border: 1px solid {p.border};
+    color: {p.text};
+}}
+QTableWidget::item {{
+    padding: 3px;
+}}
+QTableWidget::item:selected {{
+    background: {p.accent};
+    color: {p.accent_text};
+}}
+QHeaderView::section {{
+    background: {p.bg_panel};
+    color: {p.text};
+    padding: 4px;
+    border: none;
+    border-right: 1px solid {p.border};
+    border-bottom: 1px solid {p.border};
+}}
 
 /* Ribbon */
 #ribbonTabBar {{
