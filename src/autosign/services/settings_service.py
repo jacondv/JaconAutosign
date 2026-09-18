@@ -10,7 +10,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from ..security import DpapiUnavailableError, protect, unprotect
 
@@ -46,6 +46,7 @@ class AppSettings:
     last_page_scope: str = DEFAULT_PAGE_SCOPE
     last_open_dir: Optional[str] = None
     wheel_page_turn_enabled: bool = False
+    history_column_widths: Optional[List[int]] = None
 
 
 class SettingsService:

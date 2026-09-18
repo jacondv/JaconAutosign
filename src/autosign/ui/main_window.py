@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
         self._settings_screen.theme_changed.connect(self._apply_theme)
         self._sign_screen.current_file_changed.connect(self._update_title)
 
-        self._history_screen = HistoryScreen(self._history_service)
+        self._history_screen = HistoryScreen(self._history_service, self._settings_service)
 
         self._content_stack = QStackedWidget()
         self._content_stack.addWidget(self._sign_screen)

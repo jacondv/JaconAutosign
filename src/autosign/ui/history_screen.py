@@ -23,9 +23,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..services import SigningHistoryService
+from ..services import SettingsService, SigningHistoryService
 
 _NO_MATCH_SUFFIX = " (no matching folder)"
+_COLUMN_COUNT = 5
 
 _COL_INDEX = 0
 _COL_TIME = 1
@@ -35,9 +36,15 @@ _COL_DESTINATION = 4
 
 
 class HistoryScreen(QWidget):
-    def __init__(self, history_service: SigningHistoryService, parent: QWidget | None = None):
+    def __init__(
+        self,
+        history_service: SigningHistoryService,
+        settings_service: SettingsService,
+        parent: QWidget | None = None,
+    ):
         super().__init__(parent)
         self._history = history_service
+        self._settings_service = settings_service
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -77,12 +84,31 @@ class HistoryScreen(QWidget):
         header.resizeSection(_COL_SOURCE, 260)
         header.setSectionResizeMode(_COL_DESTINATION, QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
+        self._restore_column_widths()
         # Deferred: sortIndicatorChanged fires as the click starts the sort,
         # not after it - renumbering right away would read the pre-sort
         # row order.
         header.sortIndicatorChanged.connect(lambda *_: QTimer.singleShot(0, self._renumber_rows))
+        header.sectionResized.connect(self._on_section_resized)
         self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         layout.addWidget(self._table, 1)
+
+    def _restore_column_widths(self) -> None:
+        widths = self._settings_service.load().history_column_widths
+        if not widths or len(widths) != _COLUMN_COUNT:
+            return
+        header = self._table.horizontalHeader()
+        for column, width in enumerate(widths):
+            # The last section auto-stretches (setStretchLastSection) - forcing
+            # its width here would fight that on every window resize.
+            if column != _COLUMN_COUNT - 1:
+                header.resizeSection(column, width)
+
+    def _on_section_resized(self, *_args) -> None:
+        widths = [self._table.columnWidth(c) for c in range(_COLUMN_COUNT)]
+        settings = self._settings_service.load()
+        settings.history_column_widths = widths
+        self._settings_service.save(settings)
 
     def refresh(self) -> None:
         entries = self._history.load()
