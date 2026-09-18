@@ -104,6 +104,13 @@ Thử lần lượt 2 quy tắc, dùng quy tắc nào tìm được kết quả 
    khớp, hoặc khớp nhiều hơn 1 (kể cả khớp ở độ dài số khác nhau, ví dụ
    file vừa khớp folder 2 số vừa khớp folder 4 số) → coi là mơ hồ, quy tắc
    này trả về `None` (thử tiếp quy tắc 2).
+5. **Dò thêm 1 cấp con** (`_descend_one_level`, tối đa 2 cấp): nếu folder
+   vừa khớp ở bước trên (VD `1304-Electrical`) bên trong lại có folder
+   con, áp dụng lại đúng quy tắc 1 (so số đầu) giữa các folder con đó với
+   tên file. Có khớp đúng 1 folder con → move vào folder con đó (VD
+   `1304-Electrical/130402-Wiring/`); không khớp, khớp nhiều hơn 1, hoặc
+   không có folder con nào → giữ nguyên folder cấp 1 đã tìm được. Không dò
+   xuống cấp thứ 3.
 
 **Quy tắc 2 — tên folder xuất hiện trong tên file** (`_match_by_name_substring`),
 áp dụng cho các file không bắt đầu bằng số (không khớp quy tắc 1):

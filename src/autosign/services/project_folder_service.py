@@ -31,18 +31,23 @@ def list_sibling_folders(parent: Path) -> list[Path]:
 def find_matching_project_folder(
     source_file: Path, siblings: list[Path] | None = None
 ) -> Path | None:
-    """Finds the sibling folder source_file belongs in, trying two rules
-    in order:
+    """Finds the folder source_file belongs in, trying two rules in order:
 
     1. Leading-digit code (_match_by_leading_digits): a sibling folder
        whose name starts with as many leading digits as the FOLDER's own
        leading digits, e.g. a 2-digit folder "12. Chassis" matches
        "12-report.pdf" on "12"; a 4-digit folder "1304-Electrical" matches
-       "1304-report.pdf" on "1304".
+       "1304-report.pdf" on "1304". If this matches, also look one level
+       deeper (_descend_one_level): if that folder itself has subfolders,
+       the same leading-digit rule is tried again among them, so e.g.
+       "1304-02-report.pdf" lands in "1304-Electrical/1304-02-Wiring/"
+       instead of the top-level "1304-Electrical/" when such a subfolder
+       exists. At most 2 levels deep - a third level is never checked.
     2. Folder-name substring (_match_by_name_substring), for files that
        don't start with digits at all, e.g. "JSA-T43US-A.pdf" matches a
        sibling folder "T43US"; "JSV6-EMU-ABCD.pdf" prefers "JSV6-EMU" over
-       a shorter "JSV6" also found among the siblings.
+       a shorter "JSV6" also found among the siblings. Only tried when
+       rule 1 finds nothing - no second-level descent for this rule.
 
     Each rule returns None if it finds no match or more than one
     (ambiguous - left for the user to resolve with the manual move
@@ -54,9 +59,22 @@ def find_matching_project_folder(
     scanning source_file.parent when omitted."""
     if siblings is None:
         siblings = list_sibling_folders(source_file.parent)
-    return _match_by_leading_digits(source_file, siblings) or _match_by_name_substring(
-        source_file, siblings
-    )
+    level1 = _match_by_leading_digits(source_file, siblings)
+    if level1 is not None:
+        return _descend_one_level(source_file, level1)
+    return _match_by_name_substring(source_file, siblings)
+
+
+def _descend_one_level(source_file: Path, folder: Path) -> Path:
+    """If `folder` (already matched at the top level) itself contains
+    subfolders, try the leading-digit rule once more among them, so a file
+    lands in the more specific sub-project folder instead of the top-level
+    one. Falls back to `folder` itself when it has no subfolders, or none
+    of them match unambiguously - this only ever looks one level deeper."""
+    children = list_sibling_folders(folder)
+    if not children:
+        return folder
+    return _match_by_leading_digits(source_file, children) or folder
 
 
 def _match_by_leading_digits(source_file: Path, siblings: list[Path]) -> Path | None:
