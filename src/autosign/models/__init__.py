@@ -1,6 +1,7 @@
 from .geometry import PageSize, Rect
 from .sign_scope import SignPageScope
 from .template import (
+    DEFAULT_REVISION_MAX_ROWS,
     Appearance,
     PageRef,
     PageRefType,
@@ -20,5 +21,6 @@ __all__ = [
     "Template",
     "TitleBlockField",
     "TitleBlockFieldType",
+    "DEFAULT_REVISION_MAX_ROWS",
     "SignPageScope",
 ]

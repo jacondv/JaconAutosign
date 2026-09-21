@@ -160,11 +160,12 @@ Nằm cạnh Remove/Reset/Clear trong danh sách file, tác động lên **file
 ### Bối cảnh
 Bản vẽ kỹ thuật có khung tên (title block) chứa `Drawing No.`, khối
 `DRAWN/CHK'D/APP'D` (tên tắt + ngày), và 1 bảng lịch sử revision (REV,
-DESCRIPTION, BY, CKD, APP, DATE) - dòng trên cùng luôn là revision MỚI
-NHẤT (revision mới thêm vào sẽ đẩy các dòng cũ xuống dưới, vị trí dòng
-trên cùng vì vậy luôn cố định bất kể file có bao nhiêu dòng revision).
-Tính năng này đọc các giá trị đó ra và đối chiếu chéo để phát hiện sai
-sót trước khi ký - **chỉ cảnh báo, không chặn ký**.
+DESCRIPTION, BY, CKD, APP, DATE) với **sức chứa cố định tối đa 10 dòng**.
+Mỗi khi có revision mới, dòng mới được chèn **liền trên khối các dòng
+cũ** (không phải luôn nằm ở dòng trên cùng tuyệt đối của cả bảng) - khi
+bảng chưa đầy 10 dòng, các slot phía trên khối dòng đang dùng vẫn còn
+trống. Tính năng này đọc các giá trị đó ra và đối chiếu chéo để phát
+hiện sai sót trước khi ký - **chỉ cảnh báo, không chặn ký**.
 
 ### 1. Khai báo khung ở Template Designer
 - Thêm hẳn 1 "Draw mode" bên cạnh khung chữ ký: **Signature box** (như
@@ -172,17 +173,29 @@ sót trước khi ký - **chỉ cảnh báo, không chặn ký**.
   hộp thoại chọn loại field (`TitleBlockFieldDialog`): `Drawing No.`,
   `DRAWN/CHK'D/APP'D - name/date`, hoặc `Revision table - newest ...`
   (REV No./BY/CKD/APP/DATE), và trang chứa khung tên (trang này/đầu/cuối).
-- Vì dòng revision mới nhất luôn ở vị trí cố định (xem Bối cảnh), field
-  loại "Revision table" chỉ cần vẽ **1 khung cố định** ngay dưới header
-  bảng - không cần cơ chế dò nhiều dòng.
+- Với field loại "Revision table": vẽ khung tại **slot #1** (vị trí
+  trên cùng của toàn bộ khu vực 10 dòng, có thể đang trống), rồi nhập
+  thêm **Row height** (khoảng cách tới dòng kế tiếp, pt) và **Max rows**
+  (sức chứa tối đa của bảng, mặc định 10). App tự quét toàn bộ các slot
+  bên dưới, không giả định vị trí "mới nhất" cố định.
 - Danh sách "Title block fields" hiển thị cạnh danh sách Signature
   boxes, có Edit/Delete riêng. Hoàn toàn tùy chọn - template không khai
   báo field nào thì tính năng tự tắt cho template đó.
 
-### 2. Trích xuất (`extract_title_block_info`)
-- Dùng `pypdfium2`'s `get_text_bounded()` đọc text thật nằm trong toạ
-  độ mỗi khung đã khai báo - **yêu cầu PDF có lớp text thật** (xuất từ
-  CAD/Office), không hỗ trợ file scan/ảnh (không OCR).
+### 2. Trích xuất (`extract_title_block_info`, `_extract_newest_revision_row`)
+- Field cố định (Drawing No., DRAWN/CHK'D/APP'D): đọc thẳng text trong
+  đúng 1 khung đã vẽ.
+- Field thuộc bảng revision: quét **tất cả `max_rows` slot** tính từ
+  khung đã vẽ (slot #1) xuống, mỗi slot cách nhau `row_height_pt`. Sau
+  đó xác định dòng nào là "mới nhất":
+  1. Nếu có khai báo field `REV No.`: chọn slot có **số REV lớn nhất**
+     parse được (đáng tin cậy nhất, không phụ thuộc vị trí vật lý).
+  2. Nếu không khai báo `REV No.`: dùng slot **không-trống đầu tiên
+     tính từ trên xuống** (đúng theo quy tắc "dòng mới chèn liền trên
+     khối dòng cũ" - slot trống nằm phía trên khối đang dùng).
+- Dùng `pypdfium2`'s `get_text_bounded()` đọc text thật trong toạ độ
+  mỗi khung - **yêu cầu PDF có lớp text thật** (xuất từ CAD/Office),
+  không hỗ trợ file scan/ảnh (không OCR).
 - Trả về `None` nếu template không có `title_block_fields` nào (bỏ qua
   hoàn toàn, không tốn chi phí xử lý).
 
