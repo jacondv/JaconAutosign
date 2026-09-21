@@ -304,6 +304,16 @@ def validate_title_block(
             )
         )
 
+    drawn_name = info.get(TitleBlockFieldType.DRAWN_NAME)
+    rev_by = info.get(TitleBlockFieldType.REV_BY)
+    if drawn_name and rev_by and _normalize(drawn_name) != _normalize(rev_by):
+        warnings.append(
+            TitleBlockWarning(
+                f"DRAWN ('{drawn_name}') does not match the latest revision's BY ('{rev_by}').",
+                (TitleBlockFieldType.DRAWN_NAME, TitleBlockFieldType.REV_BY),
+            )
+        )
+
     if expected_ckd and chkd_name and _normalize(chkd_name) != _normalize(expected_ckd):
         warnings.append(
             TitleBlockWarning(
@@ -336,4 +346,38 @@ def validate_title_block(
                 )
             )
 
+    warnings.extend(_check_date_order(info))
+    return warnings
+
+
+def _check_date_order(info: TitleBlockInfo) -> list[TitleBlockWarning]:
+    """DRAWN date <= CHK'D date <= APP'D date - each pair checked
+    independently (not chained) so a missing middle date (no CHK'D date
+    drawn on the template) doesn't hide a DRAWN-after-APP'D mismatch."""
+    warnings: list[TitleBlockWarning] = []
+    drawn = _parse_date(info.get(TitleBlockFieldType.DRAWN_DATE))
+    chkd = _parse_date(info.get(TitleBlockFieldType.CHKD_DATE))
+    appd = _parse_date(info.get(TitleBlockFieldType.APPD_DATE))
+
+    if drawn and chkd and drawn.date() > chkd.date():
+        warnings.append(
+            TitleBlockWarning(
+                f"DRAWN date ({drawn.date()}) is later than CHK'D date ({chkd.date()}).",
+                (TitleBlockFieldType.DRAWN_DATE, TitleBlockFieldType.CHKD_DATE),
+            )
+        )
+    if chkd and appd and chkd.date() > appd.date():
+        warnings.append(
+            TitleBlockWarning(
+                f"CHK'D date ({chkd.date()}) is later than APP'D date ({appd.date()}).",
+                (TitleBlockFieldType.CHKD_DATE, TitleBlockFieldType.APPD_DATE),
+            )
+        )
+    if drawn and appd and drawn.date() > appd.date():
+        warnings.append(
+            TitleBlockWarning(
+                f"DRAWN date ({drawn.date()}) is later than APP'D date ({appd.date()}).",
+                (TitleBlockFieldType.DRAWN_DATE, TitleBlockFieldType.APPD_DATE),
+            )
+        )
     return warnings

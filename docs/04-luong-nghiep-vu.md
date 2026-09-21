@@ -214,18 +214,24 @@ chặn ký**.
   hoàn toàn, không tốn chi phí xử lý).
 
 ### 3. Đối chiếu (`validate_title_block`) - toàn bộ chỉ sinh cảnh báo
-1. **Drawing No. khớp tên file**: số/ký hiệu trích được phải xuất hiện
-   trong tên file (`stem`).
+1. **Drawing No. khớp tên file**: số/ký hiệu trích được chỉ cần là 1
+   cụm con xuất hiện trong tên file (`stem`), VD `13080059` khớp với
+   file `13080059-Rev0.pdf`.
 2. **CHK'D (khung tên) = CKD (dòng revision mới nhất)**: lệch nhau →
    cảnh báo, đánh dấu cả 2 field.
 3. **APP'D (khung tên) = APP (dòng revision mới nhất)**: tương tự.
-4. **Giá trị cố định theo Settings** (tùy chọn - `expected_ckd` /
+4. **DRAWN (khung tên) = BY (dòng revision mới nhất)**: tương tự.
+5. **Giá trị cố định theo Settings** (tùy chọn - `expected_ckd` /
    `expected_app` trong `AppSettings`, cấu hình ở Settings → "Title
    block check"): nếu đã điền, CHK'D/APP'D phải đúng bằng giá trị đó
    (VD CKD phải luôn là "DV"). Bỏ trống ở Settings thì bỏ qua rule này.
-5. **Ngày không được ở tương lai so với ngày ký**: mọi field ngày
+6. **Ngày không được ở tương lai so với ngày ký**: mọi field ngày
    (`DRAWN_DATE`, `CHKD_DATE`, `APPD_DATE`, `REV_DATE`) trích được, nếu
    parse được và muộn hơn ngày ký thực tế → cảnh báo.
+7. **Thứ tự ngày: DRAWN ≤ CHK'D ≤ APP'D** (`_check_date_order`) - kiểm
+   tra từng cặp độc lập (Drawn/Chkd, Chkd/Appd, Drawn/Appd), không bắt
+   buộc phải có đủ cả 3 ngày mới kiểm tra được - thiếu 1 ngày ở giữa thì
+   vẫn so được cặp còn lại.
 
 ### 4. Hiển thị cảnh báo
 - **Thời điểm tính lại**: chỉ khi đang **xem trước 1 file cụ thể** - lúc
