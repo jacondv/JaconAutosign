@@ -5,18 +5,9 @@ configure - it's read-only extraction, not something drawn onto the PDF.
 """
 from __future__ import annotations
 
-from PySide6.QtWidgets import (
-    QComboBox,
-    QDialog,
-    QDialogButtonBox,
-    QDoubleSpinBox,
-    QFormLayout,
-    QLabel,
-    QSpinBox,
-    QVBoxLayout,
-)
+from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
-from ..models import DEFAULT_REVISION_MAX_ROWS, PageRef, PageRefType, TitleBlockFieldType
+from ..models import PageRef, PageRefType, TitleBlockFieldType
 
 _FIELD_LABELS: dict[TitleBlockFieldType, str] = {
     TitleBlockFieldType.DRAWING_NO: "Drawing No.",
@@ -44,8 +35,6 @@ class TitleBlockFieldDialog(QDialog):
         current_page_number: int,
         field_type: TitleBlockFieldType | None = None,
         page_ref: PageRef | None = None,
-        row_height_pt: float | None = None,
-        max_rows: int = DEFAULT_REVISION_MAX_ROWS,
         parent=None,
     ):
         super().__init__(parent)
@@ -59,20 +48,13 @@ class TitleBlockFieldDialog(QDialog):
             index = self._type_combo.findData(TitleBlockFieldType(field_type).value)
             if index >= 0:
                 self._type_combo.setCurrentIndex(index)
-        self._type_combo.currentIndexChanged.connect(self._update_row_fields_visibility)
+        self._type_combo.currentIndexChanged.connect(self._update_row_hint_visibility)
 
-        self._row_height_spin = QDoubleSpinBox()
-        self._row_height_spin.setRange(1.0, 200.0)
-        self._row_height_spin.setSuffix(" pt")
-        self._row_height_spin.setValue(row_height_pt or 12.0)
-        self._max_rows_spin = QSpinBox()
-        self._max_rows_spin.setRange(1, 50)
-        self._max_rows_spin.setValue(max_rows)
         self._row_hint = QLabel(
-            "The rectangle you drew is row slot #1 (the topmost slot of the table's fixed "
-            "capacity) - it may be blank on files with fewer revisions than that capacity. "
-            "Row height is the vertical distance to the next slot down; the app scans every "
-            "slot and picks the actual newest revision, wherever it lands."
+            "Draw this box tightly around the BOTTOM row of the revision table (REV 0, the "
+            "initial release) - it never moves as later revisions are added above it. The "
+            "box's own height is used as the row spacing; the app scans upward until it hits "
+            "a blank row to find the newest revision, so there's nothing else to configure."
         )
         self._row_hint.setWordWrap(True)
 
@@ -89,14 +71,9 @@ class TitleBlockFieldDialog(QDialog):
             else:
                 self._page_combo.setCurrentIndex(0)
 
-        self._row_height_label = QLabel("Row height:")
-        self._max_rows_label = QLabel("Max rows in table:")
-
         form = QFormLayout()
         form.addRow("Field:", self._type_combo)
         form.addRow("Page:", self._page_combo)
-        form.addRow(self._row_height_label, self._row_height_spin)
-        form.addRow(self._max_rows_label, self._max_rows_spin)
         form.addRow("", self._row_hint)
 
         buttons = QDialogButtonBox(
@@ -106,27 +83,14 @@ class TitleBlockFieldDialog(QDialog):
         buttons.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(
-            QLabel(
-                "Mark what this rectangle contains. For a \"Revision table\" field, draw the "
-                "topmost row slot of the table."
-            )
-        )
+        layout.addWidget(QLabel("Mark what this rectangle contains."))
         layout.addLayout(form)
         layout.addWidget(buttons)
 
-        self._update_row_fields_visibility()
+        self._update_row_hint_visibility()
 
-    def _update_row_fields_visibility(self) -> None:
-        is_row = self.result_field_type().is_revision_row
-        for widget in (
-            self._row_height_label,
-            self._row_height_spin,
-            self._max_rows_label,
-            self._max_rows_spin,
-            self._row_hint,
-        ):
-            widget.setVisible(is_row)
+    def _update_row_hint_visibility(self) -> None:
+        self._row_hint.setVisible(self.result_field_type().is_revision_row)
 
     def result_field_type(self) -> TitleBlockFieldType:
         return TitleBlockFieldType(self._type_combo.currentData())
@@ -141,9 +105,3 @@ class TitleBlockFieldDialog(QDialog):
         if kind == "last":
             return PageRef(type=PageRefType.LAST)
         return PageRef(type=PageRefType.ABSOLUTE, page_number=self._current_page_number)
-
-    def result_row_height_pt(self) -> float | None:
-        return self._row_height_spin.value() if self.result_field_type().is_revision_row else None
-
-    def result_max_rows(self) -> int:
-        return self._max_rows_spin.value()

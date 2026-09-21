@@ -69,40 +69,51 @@ def extract_title_block_info(pdf_path: Path, template: Template) -> Optional[Tit
     return TitleBlockInfo(values=values)
 
 
+# Circuit breaker only - not a real-world limit, just a bound on how far
+# _extract_newest_revision_row walks upward before giving up, in case a
+# malformed/unusual PDF never produces a fully-blank row.
+_MAX_SCAN_ROWS = 200
+
+
 def _extract_newest_revision_row(
     doc: "pdfium.PdfDocument", page_count: int, revision_fields: list[TitleBlockField]
 ) -> dict[TitleBlockFieldType, str]:
-    """Each revision field's `rect` marks row slot #1 (the topmost slot of
-    the table's fixed capacity) - which may be blank, since a new revision
-    is inserted directly above the previously-newest one rather than always
-    landing in slot #1 (see TitleBlockField's docstring). Reads every slot
-    for every field, then picks whichever row is actually the newest -
-    highest REV number if a REV_NUMBER field was drawn, otherwise the
-    first (topmost) row with any non-blank text, which is where a new
-    revision lands per that same insertion rule."""
-    per_field_rows: dict[TitleBlockFieldType, list[str]] = {}
-    max_rows_seen = 0
-    for tb_field in revision_fields:
-        page_index = tb_field.page_ref.resolve_index(page_count)
-        if page_index is None:
-            continue
-        max_rows = max(1, tb_field.max_rows)
-        row_height = tb_field.row_height_pt or 0.0
-        rows_text = []
-        for i in range(max_rows):
+    """Each revision field's `rect` is drawn tightly around REV 0 (the
+    bottom row, which never moves - see TitleBlockField's docstring).
+    Walks upward in rect.height steps (row index 0 = REV 0, 1 = the row
+    above it, ...) until a row comes back completely blank across every
+    revision field, then picks whichever row within that filled block is
+    actually the newest: highest REV number if a REV_NUMBER field was
+    drawn, otherwise simply the last (topmost) filled row."""
+    per_field_rows: dict[TitleBlockFieldType, list[str]] = {
+        TitleBlockFieldType(f.field_type): [] for f in revision_fields
+    }
+    last_filled_index = -1
+    for i in range(_MAX_SCAN_ROWS):
+        any_non_blank = False
+        for tb_field in revision_fields:
+            page_index = tb_field.page_ref.resolve_index(page_count)
+            field_type = TitleBlockFieldType(tb_field.field_type)
+            if page_index is None:
+                per_field_rows[field_type].append("")
+                continue
             row_rect = Rect(
                 x=tb_field.rect.x,
-                y=tb_field.rect.y - i * row_height,
+                y=tb_field.rect.y + i * tb_field.rect.height,
                 width=tb_field.rect.width,
                 height=tb_field.rect.height,
             )
-            rows_text.append(_extract_rect_text(doc, page_index, row_rect))
-        per_field_rows[TitleBlockFieldType(tb_field.field_type)] = rows_text
-        max_rows_seen = max(max_rows_seen, len(rows_text))
-
-    newest_index = _pick_newest_row_index(per_field_rows, max_rows_seen)
-    if newest_index is None:
+            text = _extract_rect_text(doc, page_index, row_rect)
+            per_field_rows[field_type].append(text)
+            if text:
+                any_non_blank = True
+        if not any_non_blank:
+            break
+        last_filled_index = i
+    if last_filled_index < 0:
         return {}
+
+    newest_index = _pick_newest_row_index(per_field_rows, last_filled_index)
     return {
         field_type: rows[newest_index]
         for field_type, rows in per_field_rows.items()
@@ -111,8 +122,8 @@ def _extract_newest_revision_row(
 
 
 def _pick_newest_row_index(
-    per_field_rows: dict[TitleBlockFieldType, list[str]], max_rows_seen: int
-) -> Optional[int]:
+    per_field_rows: dict[TitleBlockFieldType, list[str]], last_filled_index: int
+) -> int:
     rev_number_rows = per_field_rows.get(TitleBlockFieldType.REV_NUMBER)
     if rev_number_rows:
         best_index: Optional[int] = None
@@ -126,14 +137,9 @@ def _pick_newest_row_index(
                 best_value, best_index = value, i
         if best_index is not None:
             return best_index
-    # No REV_NUMBER field, or none of its rows parsed as a number - fall
-    # back to the topmost row with anything in it, which is where a new
-    # revision lands (see _extract_newest_revision_row's docstring).
-    for i in range(max_rows_seen):
-        for rows in per_field_rows.values():
-            if i < len(rows) and rows[i]:
-                return i
-    return None
+    # No REV_NUMBER field, or none of its rows parsed as a number - the
+    # last filled row (topmost of the used block) is the newest.
+    return last_filled_index
 
 
 def _extract_rect_text(doc: "pdfium.PdfDocument", page_index: int, rect: Rect) -> str:

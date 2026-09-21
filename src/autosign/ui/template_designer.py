@@ -288,8 +288,6 @@ class TemplateDesignerScreen(QWidget):
             page_ref=dialog.result_page_ref(),
             rect=rect,
             page_size_at_design_time=page_size,
-            row_height_pt=dialog.result_row_height_pt(),
-            max_rows=dialog.result_max_rows(),
         )
         self._title_fields[field_id] = tb_field
         self._title_field_order.append(field_id)
@@ -407,16 +405,12 @@ class TemplateDesignerScreen(QWidget):
             current_page_number=self._current_page + 1,
             field_type=tb_field.field_type,
             page_ref=tb_field.page_ref,
-            row_height_pt=tb_field.row_height_pt,
-            max_rows=tb_field.max_rows,
             parent=self,
         )
         if dialog.exec() != TitleBlockFieldDialog.DialogCode.Accepted:
             return
         tb_field.field_type = dialog.result_field_type()
         tb_field.page_ref = dialog.result_page_ref()
-        tb_field.row_height_pt = dialog.result_row_height_pt()
-        tb_field.max_rows = dialog.result_max_rows()
         self._refresh_title_field_list()
         self._sync_canvas_boxes()
 

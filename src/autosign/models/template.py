@@ -174,14 +174,14 @@ class TitleBlockFieldType(str, Enum):
 
     @property
     def is_revision_row(self) -> bool:
-        """Revision-table fields sit in a fixed-capacity table (a bounded
-        number of row slots) where a new revision is inserted directly above
-        the previously-newest one, so the newest row's position SHIFTS as
-        more revisions are added (unlike a fixed field) - see
-        TitleBlockField.row_height_pt/max_rows and
-        title_block_service._extract_newest_revision_row, which scans every
-        slot and picks the actual newest one instead of assuming a fixed
-        position."""
+        """Revision-table fields sit in a table where REV 0 (the initial
+        release) is always the BOTTOM row, and every later revision is
+        inserted directly above the previously-newest one - so the newest
+        row's position shifts upward as more revisions pile up, but the
+        bottom (REV 0) never moves. See TitleBlockField's docstring and
+        title_block_service._extract_newest_revision_row, which uses that
+        fixed bottom anchor to scan upward instead of assuming the newest
+        row is at some fixed position."""
         return self in (
             TitleBlockFieldType.REV_NUMBER,
             TitleBlockFieldType.REV_BY,
@@ -189,9 +189,6 @@ class TitleBlockFieldType(str, Enum):
             TitleBlockFieldType.REV_APP,
             TitleBlockFieldType.REV_DATE,
         )
-
-
-DEFAULT_REVISION_MAX_ROWS = 10
 
 
 @dataclass
@@ -202,13 +199,12 @@ class TitleBlockField:
 
     For a fixed field (Drawing No., DRAWN/CHK'D/APP'D) `rect` always points
     at the same spot. For a revision-row field (field_type.is_revision_row),
-    `rect` points at row slot #1 - the TOPMOST slot of the table's fixed
-    capacity (`max_rows` slots, `row_height_pt` apart) - which may well be
-    blank on a file with fewer revisions than that capacity, since newer
-    revisions get inserted directly above the older block rather than
-    always landing in slot #1. Extraction scans all `max_rows` slots below
-    `rect` and picks the actual newest row (see title_block_service.py)
-    instead of assuming slot #1 is always the one that's filled.
+    `rect` must be drawn tightly around the BOTTOM row of the revision
+    table - REV 0, the initial release, which never moves regardless of how
+    many later revisions exist. `rect.height` doubles as the row spacing:
+    extraction (title_block_service.py) walks upward from `rect` in
+    rect.height steps until it hits a blank row, and the last non-blank row
+    found is the newest revision.
     """
 
     field_id: str
@@ -216,8 +212,6 @@ class TitleBlockField:
     page_ref: PageRef
     rect: Rect
     page_size_at_design_time: PageSize
-    row_height_pt: Optional[float] = None  # revision-row fields only
-    max_rows: int = DEFAULT_REVISION_MAX_ROWS  # revision-row fields only
 
     def to_dict(self) -> dict:
         return {
@@ -226,8 +220,6 @@ class TitleBlockField:
             "page_ref": self.page_ref.to_dict(),
             "rect": self.rect.to_dict(),
             "page_size_at_design_time": self.page_size_at_design_time.to_dict(),
-            "row_height_pt": self.row_height_pt,
-            "max_rows": self.max_rows,
         }
 
     @staticmethod
@@ -238,8 +230,6 @@ class TitleBlockField:
             page_ref=PageRef.from_dict(data["page_ref"]),
             rect=Rect.from_dict(data["rect"]),
             page_size_at_design_time=PageSize.from_dict(data["page_size_at_design_time"]),
-            row_height_pt=data.get("row_height_pt"),
-            max_rows=data.get("max_rows", DEFAULT_REVISION_MAX_ROWS),
         )
 
 
