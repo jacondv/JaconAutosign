@@ -215,11 +215,21 @@ chặn ký**.
    parse được và muộn hơn ngày ký thực tế → cảnh báo.
 
 ### 4. Hiển thị cảnh báo
-- Khi xem trước 1 file (chọn trong danh sách, hoặc đổi template), ứng
-  dụng tính lại cảnh báo và cache theo file (`_title_block_warnings`).
-- **Trên preview PDF**: field nào bị cảnh báo được viền đỏ đậm hơn
-  (`PageCanvas` - tham số `warning_ids` của `set_boxes`), phân biệt với
-  màu xanh (field bình thường) hay đỏ nhạt hơn (đang chọn khi vẽ).
+- **Thời điểm tính lại**: chỉ khi đang **xem trước 1 file cụ thể** - lúc
+  chọn file trong danh sách (`_load_preview`) hoặc đổi Template trong
+  khi file đó đang mở (`_on_template_changed`). Không chạy nền cho toàn
+  bộ danh sách, không chạy lại lúc bấm Ký - đây thuần là công cụ xem
+  trước, không phải một bước trong luồng ký. Kết quả cache theo file
+  (`_title_block_info`, `_title_block_warnings`) nên đổi Settings
+  (Expected CKD/APP) trong khi file đang mở sẵn thì cần chọn lại file
+  (hoặc đổi qua đổi lại template) để tính lại.
+- **Trên preview PDF** (`PageCanvas` - tham số `warning_ids`/`ok_ids`
+  của `set_boxes`), theo kiểu đèn giao thông:
+  - **Viền đỏ đậm**: field bị 1 rule cảnh báo (VD CHK'D lệch CKD).
+  - **Viền xanh lá đậm**: field trích được giá trị và không bị cảnh báo
+    nào - "đã kiểm tra, ổn".
+  - **Viền xanh dương** (mặc định, như khung chữ ký): field không trích
+    được gì (rỗng) - chưa xác minh được, không phải đỏ hay xanh lá.
 - **Trong danh sách file**: file có cảnh báo hiện thêm `⚠ N` sau tên,
   chữ màu đỏ, tooltip liệt kê đầy đủ nội dung từng cảnh báo.
 - Không có hộp thoại chặn ký nào - người dùng tự quyết định có ký tiếp

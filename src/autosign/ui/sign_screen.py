@@ -94,6 +94,7 @@ class SignScreen(QWidget):
         self._results: dict[Path, object] = {}
         self._project_folder_cache: dict[Path, list[Path]] = {}
         self._title_block_warnings: dict[Path, list] = {}
+        self._title_block_info: dict[Path, object] = {}
         self._current_file: Path | None = None
         self._current_pdf_info: PdfInfo | None = None
         self._current_signed_pages: set[int] = set()
@@ -316,27 +317,30 @@ class SignScreen(QWidget):
 
     # ------------------------------------------------------- title block check
     def _refresh_title_block_warnings(self, path: Path) -> None:
-        self._title_block_warnings[path] = self._compute_title_block_warnings(path)
+        info, warnings = self._compute_title_block_info_and_warnings(path)
+        self._title_block_info[path] = info
+        self._title_block_warnings[path] = warnings
         self._refresh_file_list()
 
-    def _compute_title_block_warnings(self, path: Path) -> list:
+    def _compute_title_block_info_and_warnings(self, path: Path):
         template = self._current_template()
         if template is None or not template.title_block_fields:
-            return []
+            return None, []
         try:
             info = extract_title_block_info(path, template)
         except Exception:
-            return []
+            return None, []
         if info is None:
-            return []
+            return None, []
         settings = self._settings_service.load()
-        return validate_title_block(
+        warnings = validate_title_block(
             info,
             path,
             datetime.now().astimezone(),
             expected_ckd=settings.expected_ckd,
             expected_app=settings.expected_app,
         )
+        return info, warnings
 
     def _resolve_output_path(self, source_path: Path) -> Path:
         settings = self._settings_service.load()
@@ -362,6 +366,7 @@ class SignScreen(QWidget):
         pixel_boxes: dict[str, object] = {}
         labels: dict[str, str] = {}
         warning_ids: set[str] = set()
+        ok_ids: set[str] = set()
         if template and self._current_pdf_info:
             page_index = self._viewer.current_page()
             dpi = self._viewer.dpi()
@@ -382,6 +387,7 @@ class SignScreen(QWidget):
             warned_field_types = set()
             for tb_warning in self._title_block_warnings.get(self._current_file, []):
                 warned_field_types.update(tb_warning.field_types)
+            tb_info = self._title_block_info.get(self._current_file)
             for tb_field in template.title_block_fields:
                 if tb_field.page_ref.resolve_index(self._current_pdf_info.page_count) != page_index:
                     continue
@@ -392,7 +398,12 @@ class SignScreen(QWidget):
                 labels[tb_field.field_id] = tb_field.field_type.value
                 if tb_field.field_type in warned_field_types:
                     warning_ids.add(tb_field.field_id)
-        self._viewer.set_boxes(pixel_boxes, labels, warning_ids)
+                elif tb_info is not None and tb_info.get(tb_field.field_type):
+                    # Extracted a real value and no rule flagged it - green
+                    # "checked, looks fine", distinct from the default blue
+                    # of a field that's simply never been validated.
+                    ok_ids.add(tb_field.field_id)
+        self._viewer.set_boxes(pixel_boxes, labels, warning_ids, ok_ids)
 
     # -------------------------------------------------------------- template
     def reload_templates(self) -> None:
