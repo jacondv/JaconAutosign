@@ -166,6 +166,11 @@ class TitleBlockFieldType(str, Enum):
     CHKD_DATE = "chkd_date"
     APPD_NAME = "appd_name"
     APPD_DATE = "appd_date"
+    # The small standalone "REV" box next to Drawing No. in the main title
+    # block (see the sample image) - a FIXED field, distinct from
+    # REV_NUMBER below (the REV column of the revision-history table's
+    # newest row). validate_title_block() cross-checks the two match.
+    TITLE_REV_NUMBER = "title_rev_number"
     REV_NUMBER = "rev_number"
     REV_BY = "rev_by"
     REV_CKD = "rev_ckd"

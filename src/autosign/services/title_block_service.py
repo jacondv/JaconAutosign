@@ -284,6 +284,17 @@ def validate_title_block(
             )
         )
 
+    title_rev = info.get(TitleBlockFieldType.TITLE_REV_NUMBER)
+    rev_number = info.get(TitleBlockFieldType.REV_NUMBER)
+    if title_rev and rev_number and _normalize(title_rev) != _normalize(rev_number):
+        warnings.append(
+            TitleBlockWarning(
+                f"Title block REV ('{title_rev}') does not match the revision table's newest "
+                f"REV ('{rev_number}').",
+                (TitleBlockFieldType.TITLE_REV_NUMBER, TitleBlockFieldType.REV_NUMBER),
+            )
+        )
+
     chkd_name = info.get(TitleBlockFieldType.CHKD_NAME)
     rev_ckd = info.get(TitleBlockFieldType.REV_CKD)
     if chkd_name and rev_ckd and _normalize(chkd_name) != _normalize(rev_ckd):

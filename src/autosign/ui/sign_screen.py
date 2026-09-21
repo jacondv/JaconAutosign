@@ -395,7 +395,10 @@ class SignScreen(QWidget):
                 if actual_size.differs_from(tb_field.page_size_at_design_time):
                     rect = rect.scaled_to(tb_field.page_size_at_design_time, actual_size)
                 pixel_boxes[tb_field.field_id] = pdf_rect_to_pixel(rect, actual_size, dpi)
-                labels[tb_field.field_id] = tb_field.field_type.value
+                # No label here (unlike signature boxes) - the internal
+                # field_type name (e.g. "rev_ckd") is a technical detail the
+                # box color already speaks for; Template Designer still
+                # shows it since a designer needs to tell fields apart.
                 if tb_field.field_type in warned_field_types:
                     warning_ids.add(tb_field.field_id)
                 elif tb_info is not None and tb_info.get(tb_field.field_type):

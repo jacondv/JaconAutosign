@@ -217,18 +217,23 @@ chặn ký**.
 1. **Drawing No. khớp tên file**: số/ký hiệu trích được chỉ cần là 1
    cụm con xuất hiện trong tên file (`stem`), VD `13080059` khớp với
    file `13080059-Rev0.pdf`.
-2. **CHK'D (khung tên) = CKD (dòng revision mới nhất)**: lệch nhau →
+2. **REV (ô riêng cạnh Drawing No. trong khung tên) = REV mới nhất
+   trong bảng revision**: field `TITLE_REV_NUMBER` (ô "REV" nhỏ, độc
+   lập với bảng revision - xem ảnh mẫu) phải khớp với `REV_NUMBER` (số
+   REV của dòng mới nhất do bảng revision quét ra) - lệch nhau → cảnh
+   báo.
+3. **CHK'D (khung tên) = CKD (dòng revision mới nhất)**: lệch nhau →
    cảnh báo, đánh dấu cả 2 field.
-3. **APP'D (khung tên) = APP (dòng revision mới nhất)**: tương tự.
-4. **DRAWN (khung tên) = BY (dòng revision mới nhất)**: tương tự.
-5. **Giá trị cố định theo Settings** (tùy chọn - `expected_ckd` /
+4. **APP'D (khung tên) = APP (dòng revision mới nhất)**: tương tự.
+5. **DRAWN (khung tên) = BY (dòng revision mới nhất)**: tương tự.
+6. **Giá trị cố định theo Settings** (tùy chọn - `expected_ckd` /
    `expected_app` trong `AppSettings`, cấu hình ở Settings → "Title
    block check"): nếu đã điền, CHK'D/APP'D phải đúng bằng giá trị đó
    (VD CKD phải luôn là "DV"). Bỏ trống ở Settings thì bỏ qua rule này.
-6. **Ngày không được ở tương lai so với ngày ký**: mọi field ngày
+7. **Ngày không được ở tương lai so với ngày ký**: mọi field ngày
    (`DRAWN_DATE`, `CHKD_DATE`, `APPD_DATE`, `REV_DATE`) trích được, nếu
    parse được và muộn hơn ngày ký thực tế → cảnh báo.
-7. **Thứ tự ngày: DRAWN ≤ CHK'D ≤ APP'D** (`_check_date_order`) - kiểm
+8. **Thứ tự ngày: DRAWN ≤ CHK'D ≤ APP'D** (`_check_date_order`) - kiểm
    tra từng cặp độc lập (Drawn/Chkd, Chkd/Appd, Drawn/Appd), không bắt
    buộc phải có đủ cả 3 ngày mới kiểm tra được - thiếu 1 ngày ở giữa thì
    vẫn so được cặp còn lại.
@@ -249,6 +254,9 @@ chặn ký**.
     nào - "đã kiểm tra, ổn".
   - **Viền xanh dương** (mặc định, như khung chữ ký): field không trích
     được gì (rỗng) - chưa xác minh được, không phải đỏ hay xanh lá.
+  - Không hiện tên field kỹ thuật (VD `rev_ckd`) đè lên preview - chỉ
+    màu viền nói lên trạng thái. Tên field vẫn hiện trong Template
+    Designer để người thiết kế phân biệt được các khung.
 - **Trong danh sách file**: file có cảnh báo hiện thêm `⚠ N` sau tên,
   chữ màu đỏ, tooltip liệt kê đầy đủ nội dung từng cảnh báo.
 - Không có hộp thoại chặn ký nào - người dùng tự quyết định có ký tiếp

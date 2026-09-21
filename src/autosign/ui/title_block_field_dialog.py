@@ -17,6 +17,7 @@ _FIELD_LABELS: dict[TitleBlockFieldType, str] = {
     TitleBlockFieldType.CHKD_DATE: "CHK'D - date",
     TitleBlockFieldType.APPD_NAME: "APP'D - name",
     TitleBlockFieldType.APPD_DATE: "APP'D - date",
+    TitleBlockFieldType.TITLE_REV_NUMBER: "REV No. (title block box, next to Drawing No.)",
     TitleBlockFieldType.REV_NUMBER: "Revision table - newest REV No.",
     TitleBlockFieldType.REV_BY: "Revision table - newest BY",
     TitleBlockFieldType.REV_CKD: "Revision table - newest CKD",
