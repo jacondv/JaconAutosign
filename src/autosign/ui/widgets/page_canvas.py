@@ -55,6 +55,7 @@ class PageCanvas(QWidget):
         self._pixmap: QPixmap | None = None
         self._boxes: dict[str, QRectF] = {}
         self._labels: dict[str, str] = {}
+        self._warning_ids: set[str] = set()
         self._selected_id: str | None = None
         self._interactive = True
         self._backdrop = _DEFAULT_BACKDROP
@@ -106,9 +107,15 @@ class PageCanvas(QWidget):
         self.setFixedSize(self._pixmap.deviceIndependentSize().toSize())
         self.update()
 
-    def set_boxes(self, boxes: dict[str, QRectF], labels: dict[str, str] | None = None) -> None:
+    def set_boxes(
+        self,
+        boxes: dict[str, QRectF],
+        labels: dict[str, str] | None = None,
+        warning_ids: set[str] | None = None,
+    ) -> None:
         self._boxes = dict(boxes)
         self._labels = dict(labels) if labels else {}
+        self._warning_ids = set(warning_ids) if warning_ids else set()
         if self._selected_id not in self._boxes:
             self._selected_id = None
         self.update()
@@ -187,7 +194,8 @@ class PageCanvas(QWidget):
 
         for box_id, rect in self._boxes.items():
             selected = self._interactive and box_id == self._selected_id
-            self._paint_box(painter, rect, selected, self._labels.get(box_id, ""))
+            warning = box_id in self._warning_ids
+            self._paint_box(painter, rect, selected, self._labels.get(box_id, ""), warning)
 
         if self._mode == "draw" and self._draw_rect is not None:
             pen = QPen(QColor(40, 170, 60), 2, Qt.PenStyle.DashLine)
@@ -211,9 +219,16 @@ class PageCanvas(QWidget):
             pdf_rect = Rect(x=left, y=bottom, width=right - left, height=top - bottom)
             painter.drawRect(pdf_rect_to_pixel(pdf_rect, self._page_size, self._dpi))
 
-    def _paint_box(self, painter: QPainter, rect: QRectF, selected: bool, label: str) -> None:
-        color = QColor(220, 40, 40) if selected else QColor(30, 120, 220)
-        painter.setPen(QPen(color, 2))
+    def _paint_box(
+        self, painter: QPainter, rect: QRectF, selected: bool, label: str, warning: bool = False
+    ) -> None:
+        if warning:
+            color = QColor(220, 0, 0)
+        elif selected:
+            color = QColor(220, 40, 40)
+        else:
+            color = QColor(30, 120, 220)
+        painter.setPen(QPen(color, 3 if warning else 2))
         painter.setBrush(QColor(color.red(), color.green(), color.blue(), 45))
         painter.drawRect(rect)
         if label:

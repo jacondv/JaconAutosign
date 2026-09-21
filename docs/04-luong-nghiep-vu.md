@@ -148,6 +148,69 @@ Nằm cạnh Remove/Reset/Clear trong danh sách file, tác động lên **file
 3. Không tìm được folder khớp → mở hộp thoại chọn thư mục đích thủ công.
 4. Move theo đúng cơ chế ở mục 3 (kể cả xử lý trùng tên).
 
+## Luồng E — Kiểm tra khung tên bản vẽ (title block, đã cài đặt)
+
+> Code: `src/autosign/services/title_block_service.py` (trích xuất +
+> kiểm tra), `src/autosign/models/template.py` (`TitleBlockField`,
+> `TitleBlockFieldType`), `src/autosign/ui/template_designer.py` +
+> `src/autosign/ui/title_block_field_dialog.py` (vẽ khung ở Template
+> Designer), `src/autosign/ui/sign_screen.py`
+> (`_compute_title_block_warnings`, `_sync_preview_overlay`).
+
+### Bối cảnh
+Bản vẽ kỹ thuật có khung tên (title block) chứa `Drawing No.`, khối
+`DRAWN/CHK'D/APP'D` (tên tắt + ngày), và 1 bảng lịch sử revision (REV,
+DESCRIPTION, BY, CKD, APP, DATE) - dòng trên cùng luôn là revision MỚI
+NHẤT (revision mới thêm vào sẽ đẩy các dòng cũ xuống dưới, vị trí dòng
+trên cùng vì vậy luôn cố định bất kể file có bao nhiêu dòng revision).
+Tính năng này đọc các giá trị đó ra và đối chiếu chéo để phát hiện sai
+sót trước khi ký - **chỉ cảnh báo, không chặn ký**.
+
+### 1. Khai báo khung ở Template Designer
+- Thêm hẳn 1 "Draw mode" bên cạnh khung chữ ký: **Signature box** (như
+  cũ) hoặc **Title block field** (mới). Ở mode field, vẽ xong sẽ hiện
+  hộp thoại chọn loại field (`TitleBlockFieldDialog`): `Drawing No.`,
+  `DRAWN/CHK'D/APP'D - name/date`, hoặc `Revision table - newest ...`
+  (REV No./BY/CKD/APP/DATE), và trang chứa khung tên (trang này/đầu/cuối).
+- Vì dòng revision mới nhất luôn ở vị trí cố định (xem Bối cảnh), field
+  loại "Revision table" chỉ cần vẽ **1 khung cố định** ngay dưới header
+  bảng - không cần cơ chế dò nhiều dòng.
+- Danh sách "Title block fields" hiển thị cạnh danh sách Signature
+  boxes, có Edit/Delete riêng. Hoàn toàn tùy chọn - template không khai
+  báo field nào thì tính năng tự tắt cho template đó.
+
+### 2. Trích xuất (`extract_title_block_info`)
+- Dùng `pypdfium2`'s `get_text_bounded()` đọc text thật nằm trong toạ
+  độ mỗi khung đã khai báo - **yêu cầu PDF có lớp text thật** (xuất từ
+  CAD/Office), không hỗ trợ file scan/ảnh (không OCR).
+- Trả về `None` nếu template không có `title_block_fields` nào (bỏ qua
+  hoàn toàn, không tốn chi phí xử lý).
+
+### 3. Đối chiếu (`validate_title_block`) - toàn bộ chỉ sinh cảnh báo
+1. **Drawing No. khớp tên file**: số/ký hiệu trích được phải xuất hiện
+   trong tên file (`stem`).
+2. **CHK'D (khung tên) = CKD (dòng revision mới nhất)**: lệch nhau →
+   cảnh báo, đánh dấu cả 2 field.
+3. **APP'D (khung tên) = APP (dòng revision mới nhất)**: tương tự.
+4. **Giá trị cố định theo Settings** (tùy chọn - `expected_ckd` /
+   `expected_app` trong `AppSettings`, cấu hình ở Settings → "Title
+   block check"): nếu đã điền, CHK'D/APP'D phải đúng bằng giá trị đó
+   (VD CKD phải luôn là "DV"). Bỏ trống ở Settings thì bỏ qua rule này.
+5. **Ngày không được ở tương lai so với ngày ký**: mọi field ngày
+   (`DRAWN_DATE`, `CHKD_DATE`, `APPD_DATE`, `REV_DATE`) trích được, nếu
+   parse được và muộn hơn ngày ký thực tế → cảnh báo.
+
+### 4. Hiển thị cảnh báo
+- Khi xem trước 1 file (chọn trong danh sách, hoặc đổi template), ứng
+  dụng tính lại cảnh báo và cache theo file (`_title_block_warnings`).
+- **Trên preview PDF**: field nào bị cảnh báo được viền đỏ đậm hơn
+  (`PageCanvas` - tham số `warning_ids` của `set_boxes`), phân biệt với
+  màu xanh (field bình thường) hay đỏ nhạt hơn (đang chọn khi vẽ).
+- **Trong danh sách file**: file có cảnh báo hiện thêm `⚠ N` sau tên,
+  chữ màu đỏ, tooltip liệt kê đầy đủ nội dung từng cảnh báo.
+- Không có hộp thoại chặn ký nào - người dùng tự quyết định có ký tiếp
+  hay sửa lại bản vẽ trước.
+
 ## Mô tả màn hình (wireframe dạng mô tả, chưa phải thiết kế UI cuối cùng)
 
 ### Màn hình 1 — Trang chủ

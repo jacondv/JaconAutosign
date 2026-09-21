@@ -75,6 +75,7 @@ class SettingsScreen(QWidget):
         column = QVBoxLayout()
         column.addWidget(self._build_certificate_group())
         column.addWidget(self._build_output_group())
+        column.addWidget(self._build_title_block_group())
         column.addWidget(self._build_appearance_group())
         column.addWidget(self._build_shortcuts_group())
 
@@ -140,6 +141,32 @@ class SettingsScreen(QWidget):
         output_group = QGroupBox("Output folder")
         output_group.setLayout(output_layout)
         return output_group
+
+    def _build_title_block_group(self) -> QGroupBox:
+        self._expected_ckd_edit = QLineEdit()
+        self._expected_ckd_edit.setPlaceholderText("e.g. DV (leave blank to skip this check)")
+        self._expected_app_edit = QLineEdit()
+        self._expected_app_edit.setPlaceholderText("e.g. DV (leave blank to skip this check)")
+
+        form = QFormLayout()
+        form.addRow("Expected CHK'D initials:", self._expected_ckd_edit)
+        form.addRow("Expected APP'D initials:", self._expected_app_edit)
+        form.addRow(
+            "",
+            self._wrapped_hint(
+                "Only checked for templates that have title-block fields configured "
+                "(Template Designer -> Title block field). Leave blank to skip."
+            ),
+        )
+        group = QGroupBox("Title block check")
+        group.setLayout(form)
+        return group
+
+    @staticmethod
+    def _wrapped_hint(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setWordWrap(True)
+        return label
 
     def _build_templates_panel(self) -> QGroupBox:
         """The list of templates, its live preview, and the font size that
@@ -218,6 +245,10 @@ class SettingsScreen(QWidget):
             self._pfx_path_edit.setText(s.last_pfx_path)
         if s.signer_name:
             self._signer_name_edit.setText(s.signer_name)
+        if s.expected_ckd:
+            self._expected_ckd_edit.setText(s.expected_ckd)
+        if s.expected_app:
+            self._expected_app_edit.setText(s.expected_app)
         if s.output_mode == OUTPUT_MODE_CUSTOM:
             self._custom_radio.setChecked(True)
         else:
@@ -282,6 +313,8 @@ class SettingsScreen(QWidget):
             OUTPUT_MODE_CUSTOM if self._custom_radio.isChecked() else OUTPUT_MODE_SUBFOLDER
         )
         self._settings.custom_output_dir = self._custom_dir_edit.text().strip() or None
+        self._settings.expected_ckd = self._expected_ckd_edit.text().strip() or None
+        self._settings.expected_app = self._expected_app_edit.text().strip() or None
         if self._remember_password_check.isChecked() and self._password_edit.text():
             self._settings_service.set_remembered_password(
                 self._settings, self._password_edit.text()

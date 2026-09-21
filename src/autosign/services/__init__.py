@@ -10,6 +10,7 @@ from .project_folder_service import (
     move_signed_file,
 )
 from .signing_history_service import HistoryEntry, SigningHistoryService
+from .title_block_service import TitleBlockInfo, TitleBlockWarning, extract_title_block_info, validate_title_block
 
 __all__ = [
     "TemplateService",
@@ -26,4 +27,8 @@ __all__ = [
     "move_signed_file",
     "HistoryEntry",
     "SigningHistoryService",
+    "TitleBlockInfo",
+    "TitleBlockWarning",
+    "extract_title_block_info",
+    "validate_title_block",
 ]

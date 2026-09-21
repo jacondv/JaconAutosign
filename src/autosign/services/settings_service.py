@@ -47,6 +47,8 @@ class AppSettings:
     last_open_dir: Optional[str] = None
     wheel_page_turn_enabled: bool = False
     history_column_widths: Optional[List[int]] = None
+    expected_ckd: Optional[str] = None  # title-block check: required CHK'D initials, e.g. "DV"
+    expected_app: Optional[str] = None  # title-block check: required APP'D initials
 
 
 class SettingsService:

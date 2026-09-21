@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -36,7 +37,9 @@ from ..services import (
     SettingsService,
     SigningHistoryService,
     TemplateService,
+    extract_title_block_info,
     get_signed_pages,
+    validate_title_block,
 )
 from ..services.batch_sign_service import BatchSignService
 from ..services.pdf_inspect_service import PdfInspectError
@@ -90,6 +93,7 @@ class SignScreen(QWidget):
 
         self._results: dict[Path, object] = {}
         self._project_folder_cache: dict[Path, list[Path]] = {}
+        self._title_block_warnings: dict[Path, list] = {}
         self._current_file: Path | None = None
         self._current_pdf_info: PdfInfo | None = None
         self._current_signed_pages: set[int] = set()
@@ -273,7 +277,12 @@ class SignScreen(QWidget):
         self._settings_service.save(settings)
 
     def _refresh_file_list(self) -> None:
-        self._file_panel.refresh(self._compute_page_counts())
+        warning_messages = {
+            path: [w.message for w in warnings]
+            for path, warnings in self._title_block_warnings.items()
+            if warnings
+        }
+        self._file_panel.refresh(self._compute_page_counts(), warning_messages)
         if self._current_file is not None and self._current_file not in self._file_panel.files:
             self._current_file = None
             self._current_pdf_info = None
@@ -301,8 +310,33 @@ class SignScreen(QWidget):
         self._viewer.load(
             str(path), info.page_sizes, str(signed_output), self._current_signed_pages, target_page
         )
+        self._refresh_title_block_warnings(path)
         self._on_viewer_state_changed()
         self.current_file_changed.emit(path)
+
+    # ------------------------------------------------------- title block check
+    def _refresh_title_block_warnings(self, path: Path) -> None:
+        self._title_block_warnings[path] = self._compute_title_block_warnings(path)
+        self._refresh_file_list()
+
+    def _compute_title_block_warnings(self, path: Path) -> list:
+        template = self._current_template()
+        if template is None or not template.title_block_fields:
+            return []
+        try:
+            info = extract_title_block_info(path, template)
+        except Exception:
+            return []
+        if info is None:
+            return []
+        settings = self._settings_service.load()
+        return validate_title_block(
+            info,
+            path,
+            datetime.now().astimezone(),
+            expected_ckd=settings.expected_ckd,
+            expected_app=settings.expected_app,
+        )
 
     def _resolve_output_path(self, source_path: Path) -> Path:
         settings = self._settings_service.load()
@@ -327,23 +361,38 @@ class SignScreen(QWidget):
         template = self._current_template()
         pixel_boxes: dict[str, object] = {}
         labels: dict[str, str] = {}
+        warning_ids: set[str] = set()
         if template and self._current_pdf_info:
             page_index = self._viewer.current_page()
+            dpi = self._viewer.dpi()
+            actual_size = self._current_pdf_info.page_size(page_index)
             # Already-signed pages render the real embedded signature (see
             # _load_preview) - the placeholder box would just overlap it.
             if page_index not in self._current_signed_pages:
-                dpi = self._viewer.dpi()
                 for box in template.signature_boxes:
                     indices = box.page_ref.resolve_indices(self._current_pdf_info.page_count)
                     if page_index not in indices:
                         continue
                     rect = box.rect
-                    actual_size = self._current_pdf_info.page_size(page_index)
                     if actual_size.differs_from(box.page_size_at_design_time):
                         rect = rect.scaled_to(box.page_size_at_design_time, actual_size)
                     pixel_boxes[box.box_id] = pdf_rect_to_pixel(rect, actual_size, dpi)
                     labels[box.box_id] = box.label
-        self._viewer.set_boxes(pixel_boxes, labels)
+
+            warned_field_types = set()
+            for tb_warning in self._title_block_warnings.get(self._current_file, []):
+                warned_field_types.update(tb_warning.field_types)
+            for tb_field in template.title_block_fields:
+                if tb_field.page_ref.resolve_index(self._current_pdf_info.page_count) != page_index:
+                    continue
+                rect = tb_field.rect
+                if actual_size.differs_from(tb_field.page_size_at_design_time):
+                    rect = rect.scaled_to(tb_field.page_size_at_design_time, actual_size)
+                pixel_boxes[tb_field.field_id] = pdf_rect_to_pixel(rect, actual_size, dpi)
+                labels[tb_field.field_id] = tb_field.field_type.value
+                if tb_field.field_type in warned_field_types:
+                    warning_ids.add(tb_field.field_id)
+        self._viewer.set_boxes(pixel_boxes, labels, warning_ids)
 
     # -------------------------------------------------------------- template
     def reload_templates(self) -> None:
@@ -362,6 +411,8 @@ class SignScreen(QWidget):
             settings = self._settings_service.load()
             settings.last_template_id = template_id
             self._settings_service.save(settings)
+        if self._current_file is not None:
+            self._refresh_title_block_warnings(self._current_file)
         self._refresh_file_list()
         self._sync_preview_overlay()
 

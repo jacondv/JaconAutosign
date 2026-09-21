@@ -224,8 +224,8 @@ class PdfViewerWidget(QWidget):
         DEFAULT_PREVIEW_DPI constant) when converting overlay box coordinates."""
         return DEFAULT_PREVIEW_DPI * self._zoom
 
-    def set_boxes(self, boxes: dict, labels: dict | None = None) -> None:
-        self._canvas.set_boxes(boxes, labels)
+    def set_boxes(self, boxes: dict, labels: dict | None = None, warning_ids: set | None = None) -> None:
+        self._canvas.set_boxes(boxes, labels, warning_ids)
 
     def is_page_signed(self, index: int) -> bool:
         return index in self._signed_pages

@@ -121,10 +121,19 @@ class FileListPanel(QWidget):
         self.files_changed.emit()
 
     # ------------------------------------------------------------ render
-    def refresh(self, page_counts: dict[Path, tuple[int, int]] | None = None) -> None:
+    def refresh(
+        self,
+        page_counts: dict[Path, tuple[int, int]] | None = None,
+        title_block_warnings: dict[Path, list[str]] | None = None,
+    ) -> None:
         """Rebuild the list widget from current files. `page_counts` maps a
-        file to (signed_pages, total_pages), shown as "[x/y Signed]"."""
+        file to (signed_pages, total_pages), shown as "[x/y Signed]".
+        `title_block_warnings` maps a file to its title-block check warning
+        messages (only populated for files that have been previewed - see
+        SignScreen._compute_title_block_warnings), shown as a "⚠ N" marker
+        with the messages listed in the tooltip."""
         page_counts = page_counts or {}
+        title_block_warnings = title_block_warnings or {}
         current_path = self.current_path
         self._list.blockSignals(True)
         self._list.clear()
@@ -138,9 +147,16 @@ class FileListPanel(QWidget):
                 text += f"  [{signed}/{total} Signed]"
                 if signed > 0:
                     color = Qt.GlobalColor.darkGreen if signed == total else Qt.GlobalColor.darkYellow
+            warnings = title_block_warnings.get(path) or []
+            if warnings:
+                text += f"  ⚠ {len(warnings)}"
             item = QListWidgetItem(text)
             item.setData(_ROLE_PATH, path)
-            item.setToolTip(str(path))
+            tooltip = str(path)
+            if warnings:
+                tooltip += "\n\nTitle block warnings:\n" + "\n".join(f"- {w}" for w in warnings)
+                color = Qt.GlobalColor.red
+            item.setToolTip(tooltip)
             if color is not None:
                 item.setForeground(color)
             self._list.addItem(item)

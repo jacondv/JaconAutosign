@@ -155,6 +155,75 @@ class SignatureBox:
         )
 
 
+class TitleBlockFieldType(str, Enum):
+    """What a title-block field represents - drives how validate_title_block()
+    cross-checks the extracted values (see services/title_block_service.py)."""
+
+    DRAWING_NO = "drawing_no"
+    DRAWN_NAME = "drawn_name"
+    DRAWN_DATE = "drawn_date"
+    CHKD_NAME = "chkd_name"
+    CHKD_DATE = "chkd_date"
+    APPD_NAME = "appd_name"
+    APPD_DATE = "appd_date"
+    REV_NUMBER = "rev_number"
+    REV_BY = "rev_by"
+    REV_CKD = "rev_ckd"
+    REV_APP = "rev_app"
+    REV_DATE = "rev_date"
+
+    @property
+    def is_revision_row(self) -> bool:
+        """Revision-table fields sit in the newest (topmost) data row of a
+        table that grows as more revisions are added - see
+        TitleBlockField.row_height_pt."""
+        return self in (
+            TitleBlockFieldType.REV_NUMBER,
+            TitleBlockFieldType.REV_BY,
+            TitleBlockFieldType.REV_CKD,
+            TitleBlockFieldType.REV_APP,
+            TitleBlockFieldType.REV_DATE,
+        )
+
+
+@dataclass
+class TitleBlockField:
+    """A rectangle in the title block to read text from and validate - see
+    docs on the title-block-check feature. `rect` is drawn once at template
+    design time, same as a SignatureBox's rect: for a fixed field (Drawing
+    No., DRAWN/CHK'D/APP'D) it always points at the same spot; for a
+    revision-row field it points at the newest (topmost) row, since new
+    revisions are inserted above older ones, pushing them down - the
+    topmost row's position is therefore stable regardless of how many
+    revisions the file already has.
+    """
+
+    field_id: str
+    field_type: TitleBlockFieldType
+    page_ref: PageRef
+    rect: Rect
+    page_size_at_design_time: PageSize
+
+    def to_dict(self) -> dict:
+        return {
+            "field_id": self.field_id,
+            "field_type": TitleBlockFieldType(self.field_type).value,
+            "page_ref": self.page_ref.to_dict(),
+            "rect": self.rect.to_dict(),
+            "page_size_at_design_time": self.page_size_at_design_time.to_dict(),
+        }
+
+    @staticmethod
+    def from_dict(data: dict) -> "TitleBlockField":
+        return TitleBlockField(
+            field_id=data["field_id"],
+            field_type=TitleBlockFieldType(data["field_type"]),
+            page_ref=PageRef.from_dict(data["page_ref"]),
+            rect=Rect.from_dict(data["rect"]),
+            page_size_at_design_time=PageSize.from_dict(data["page_size_at_design_time"]),
+        )
+
+
 @dataclass
 class Template:
     template_id: str
@@ -162,6 +231,7 @@ class Template:
     created_at: str
     source_sample_file: Optional[str] = None
     signature_boxes: list[SignatureBox] = field(default_factory=list)
+    title_block_fields: list[TitleBlockField] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -170,6 +240,7 @@ class Template:
             "created_at": self.created_at,
             "source_sample_file": self.source_sample_file,
             "signature_boxes": [box.to_dict() for box in self.signature_boxes],
+            "title_block_fields": [f.to_dict() for f in self.title_block_fields],
         }
 
     @staticmethod
@@ -181,5 +252,8 @@ class Template:
             source_sample_file=data.get("source_sample_file"),
             signature_boxes=[
                 SignatureBox.from_dict(b) for b in data.get("signature_boxes", [])
+            ],
+            title_block_fields=[
+                TitleBlockField.from_dict(f) for f in data.get("title_block_fields", [])
             ],
         )
