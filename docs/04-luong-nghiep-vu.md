@@ -197,6 +197,19 @@ chặn ký**.
 - Dùng `pypdfium2`'s `get_text_bounded()` đọc text thật trong toạ độ
   mỗi khung - **yêu cầu PDF có lớp text thật** (xuất từ CAD/Office),
   không hỗ trợ file scan/ảnh (không OCR).
+- **Xử lý trang bị xoay (`/Rotate`)**: nhiều bản vẽ landscape được lưu
+  dưới dạng trang PDF xoay 90°/270° (`page.get_rotation()` khác 0).
+  Khung field luôn được vẽ/lưu theo hệ toạ độ **đã xoay** (giống hệt
+  những gì hiển thị trên preview và Template Designer), nhưng
+  `get_text_bounded()` của pdfium làm việc trên hệ toạ độ **gốc chưa
+  xoay** của trang - 2 hệ này lệch nhau khi trang có rotation. Trước khi
+  gọi `get_text_bounded()`, `_visual_rect_to_raw()` chuyển khung từ hệ
+  đã xoay về hệ gốc (công thức riêng cho từng góc 90/180/270). Thiếu
+  bước này thì mọi khung trên 1 trang bị xoay đều trích ra rỗng - từng
+  là bug khiến 1 file bị lỗi thật (CHK'D/APP'D sai) nhưng không hiện
+  cảnh báo nào, đã fix và test lại bằng đúng file đó.
+- Nếu trang thực tế khác kích thước với lúc vẽ khung (`page_size_at_design_time`),
+  khung được scale lại tương tự cách `SignatureBox` làm khi ký.
 - Trả về `None` nếu template không có `title_block_fields` nào (bỏ qua
   hoàn toàn, không tốn chi phí xử lý).
 

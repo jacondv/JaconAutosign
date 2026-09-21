@@ -53,20 +53,102 @@ def extract_title_block_info(pdf_path: Path, template: Template) -> Optional[Tit
             return TitleBlockInfo(values={})
         try:
             page_count = len(doc)
+            page_cache: dict[int, _PageContext] = {}
             fixed_fields = [f for f in template.title_block_fields if not f.field_type.is_revision_row]
             revision_fields = [f for f in template.title_block_fields if f.field_type.is_revision_row]
             for tb_field in fixed_fields:
                 page_index = tb_field.page_ref.resolve_index(page_count)
                 if page_index is None:
                     continue
-                text = _extract_rect_text(doc, page_index, tb_field.rect)
+                ctx = _get_page_context(doc, page_index, page_cache)
+                text = _extract_rect_text(ctx, _design_rect_to_raw(tb_field, ctx))
                 if text:
                     values[TitleBlockFieldType(tb_field.field_type)] = text
             if revision_fields:
-                values.update(_extract_newest_revision_row(doc, page_count, revision_fields))
+                values.update(_extract_newest_revision_row(doc, page_count, revision_fields, page_cache))
         finally:
+            for ctx in page_cache.values():
+                ctx.close()
             doc.close()
     return TitleBlockInfo(values=values)
+
+
+@dataclass
+class _PageContext:
+    """One page's textpage plus the geometry needed to map a field's
+    design-time rect (in the ROTATED/visual coordinate space that
+    render_page_to_qimage and the Template Designer canvas both use - see
+    coordinates.py) into pdfium's text-extraction space, which is always
+    the page's RAW, un-rotated mediabox - the two only coincide when the
+    page has no /Rotate. Kept open across every field on the same page
+    instead of re-opening per field/row (a revision-row field alone can
+    scan up to _MAX_SCAN_ROWS rows)."""
+
+    page: "pdfium.PdfPage"
+    textpage: "pdfium.PdfTextPage"
+    visual_width: float
+    visual_height: float
+    rotation: int
+
+    def close(self) -> None:
+        self.textpage.close()
+        self.page.close()
+
+
+def _get_page_context(
+    doc: "pdfium.PdfDocument", page_index: int, cache: dict[int, _PageContext]
+) -> _PageContext:
+    ctx = cache.get(page_index)
+    if ctx is not None:
+        return ctx
+    page = doc[page_index]
+    visual_width, visual_height = page.get_size()
+    ctx = _PageContext(
+        page=page,
+        textpage=page.get_textpage(),
+        visual_width=visual_width,
+        visual_height=visual_height,
+        rotation=page.get_rotation(),
+    )
+    cache[page_index] = ctx
+    return ctx
+
+
+def _design_rect_to_raw(tb_field: TitleBlockField, ctx: _PageContext) -> Rect:
+    """Rescales tb_field.rect from the page size it was drawn against to
+    the file's actual current page size (same idea as SignatureBox/
+    Rect.scaled_to elsewhere), then converts from visual/rotated space to
+    pdfium's raw text-extraction space (see _visual_rect_to_raw)."""
+    rect = tb_field.rect
+    design_size = tb_field.page_size_at_design_time
+    if (
+        abs(design_size.width - ctx.visual_width) > 0.5
+        or abs(design_size.height - ctx.visual_height) > 0.5
+    ):
+        rect = rect.scaled_to(design_size, type(design_size)(ctx.visual_width, ctx.visual_height))
+    return _visual_rect_to_raw(rect, ctx.visual_width, ctx.visual_height, ctx.rotation)
+
+
+def _visual_rect_to_raw(rect: Rect, visual_width: float, visual_height: float, rotation: int) -> Rect:
+    """Undoes the page's /Rotate so a rect drawn in visual/display space
+    (what render_page_to_qimage renders and coordinates.py maps mouse
+    clicks to/from - i.e. what every TitleBlockField.rect is stored in)
+    lands on the right spot in pdfium's raw, un-rotated text-extraction
+    space. `rotation` is the page's own /Rotate value (0/90/180/270,
+    clockwise). Derived from first principles (rotate-then-normalize) and
+    verified against a real rotation=270 drawing - see the title-block
+    check docs for the reasoning."""
+    rotation = rotation % 360
+    x, y, w, h = rect.x, rect.y, rect.width, rect.height
+    if rotation == 90:
+        raw_w = visual_height
+        return Rect(x=raw_w - y - h, y=x, width=h, height=w)
+    if rotation == 180:
+        return Rect(x=visual_width - x - w, y=visual_height - y - h, width=w, height=h)
+    if rotation == 270:
+        raw_h = visual_width
+        return Rect(x=y, y=raw_h - x - w, width=h, height=w)
+    return rect  # rotation == 0 (or an unsupported value - treat as none)
 
 
 # Circuit breaker only - not a real-world limit, just a bound on how far
@@ -76,7 +158,10 @@ _MAX_SCAN_ROWS = 200
 
 
 def _extract_newest_revision_row(
-    doc: "pdfium.PdfDocument", page_count: int, revision_fields: list[TitleBlockField]
+    doc: "pdfium.PdfDocument",
+    page_count: int,
+    revision_fields: list[TitleBlockField],
+    page_cache: dict[int, _PageContext],
 ) -> dict[TitleBlockFieldType, str]:
     """Each revision field's `rect` is drawn tightly around REV 0 (the
     bottom row, which never moves - see TitleBlockField's docstring).
@@ -97,13 +182,26 @@ def _extract_newest_revision_row(
             if page_index is None:
                 per_field_rows[field_type].append("")
                 continue
-            row_rect = Rect(
+            ctx = _get_page_context(doc, page_index, page_cache)
+            # Row-shifting happens in the SAME visual/design space the rect
+            # was drawn in, before converting to raw space - shifting the
+            # already-converted raw rect would walk the wrong axis once
+            # rotation swaps x/y.
+            design_size = tb_field.page_size_at_design_time
+            shifted = Rect(
                 x=tb_field.rect.x,
                 y=tb_field.rect.y + i * tb_field.rect.height,
                 width=tb_field.rect.width,
                 height=tb_field.rect.height,
             )
-            text = _extract_rect_text(doc, page_index, row_rect)
+            shifted_field = TitleBlockField(
+                field_id=tb_field.field_id,
+                field_type=tb_field.field_type,
+                page_ref=tb_field.page_ref,
+                rect=shifted,
+                page_size_at_design_time=design_size,
+            )
+            text = _extract_rect_text(ctx, _design_rect_to_raw(shifted_field, ctx))
             per_field_rows[field_type].append(text)
             if text:
                 any_non_blank = True
@@ -142,18 +240,13 @@ def _pick_newest_row_index(
     return last_filled_index
 
 
-def _extract_rect_text(doc: "pdfium.PdfDocument", page_index: int, rect: Rect) -> str:
-    page = doc[page_index]
-    try:
-        textpage = page.get_textpage()
-        try:
-            text = textpage.get_text_bounded(
-                left=rect.x, bottom=rect.y, right=rect.x + rect.width, top=rect.y + rect.height
-            )
-        finally:
-            textpage.close()
-    finally:
-        page.close()
+def _extract_rect_text(ctx: _PageContext, raw_rect: Rect) -> str:
+    text = ctx.textpage.get_text_bounded(
+        left=raw_rect.x,
+        bottom=raw_rect.y,
+        right=raw_rect.x + raw_rect.width,
+        top=raw_rect.y + raw_rect.height,
+    )
     return " ".join(text.split())  # collapse embedded newlines/extra whitespace
 
 
