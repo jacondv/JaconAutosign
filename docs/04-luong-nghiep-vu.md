@@ -197,12 +197,15 @@ chặn ký**.
 - Field thuộc bảng revision: bắt đầu từ khung đã vẽ (dòng REV 0, index
   0), quét **lên trên** theo từng bước bằng đúng chiều cao khung, cho
   tới khi gặp 1 dòng **hoàn toàn trống** (không field nào có chữ) thì
-  dừng - dòng trống đó là ranh giới trên của bảng đang dùng. Trong các
-  dòng đã quét được (không trống), xác định dòng "mới nhất":
-  1. Nếu có khai báo field `REV No.`: chọn dòng có **số REV lớn nhất**
-     parse được (đáng tin cậy nhất, không phụ thuộc vị trí vật lý).
-  2. Nếu không khai báo `REV No.`: dùng dòng **không trống cuối cùng**
-     quét được (tức dòng trên cùng của khối đang dùng).
+  dừng - dòng trống đó là ranh giới trên của bảng đang dùng. Dòng
+  **"mới nhất" luôn là dòng không trống cuối cùng quét được** (tức dòng
+  trên cùng của khối đang dùng) - **không** chọn theo số REV lớn nhất,
+  vì đúng số REV lớn nhất chính là điều 1 dòng bị đánh số nhầm/trùng có
+  thể sai.
+- **Trùng REV** (`_find_duplicate_revisions`): trong toàn bộ các dòng
+  quét được (không chỉ dòng mới nhất), nếu có ≥ 2 dòng cùng 1 số REV
+  (VD `0,1,2,2,3`) → cảnh báo đỏ ở field `REV No.`, dù dòng mới nhất
+  (xác định theo vị trí, không phải theo số) vẫn đúng là dòng trên cùng.
 - Dùng `pypdfium2`'s `get_text_bounded()` đọc text thật trong toạ độ
   mỗi khung - **yêu cầu PDF có lớp text thật** (xuất từ CAD/Office),
   không hỗ trợ file scan/ảnh (không OCR).
@@ -226,7 +229,9 @@ chặn ký**.
 1. **Drawing No. khớp tên file**: số/ký hiệu trích được chỉ cần là 1
    cụm con xuất hiện trong tên file (`stem`), VD `13080059` khớp với
    file `13080059-Rev0.pdf`.
-2. **REV (ô riêng cạnh Drawing No. trong khung tên) = REV mới nhất
+2. **Không có 2 dòng revision trùng số REV** - xem mục "Trùng REV" ở
+   trên.
+3. **REV (ô riêng cạnh Drawing No. trong khung tên) = REV mới nhất
    trong bảng revision**: field `TITLE_REV_NUMBER` (ô "REV" nhỏ, độc
    lập với bảng revision - xem ảnh mẫu) phải khớp với `REV_NUMBER` (số
    REV của dòng mới nhất do bảng revision quét ra) - lệch nhau → cảnh

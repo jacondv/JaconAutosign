@@ -25,9 +25,13 @@ _DATE_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y", "%d/%m/%y", "%Y-%m-%d", "%d
 @dataclass(frozen=True)
 class TitleBlockInfo:
     """One extracted text value per field_type present on the template -
-    None for any field_type the template doesn't define."""
+    None for any field_type the template doesn't define. duplicate_revisions
+    lists any REV number that appears on more than one scanned row of the
+    revision table (see _extract_newest_revision_row) - a data-entry mistake
+    validate_title_block() can't express as a single field-vs-field warning."""
 
     values: dict[TitleBlockFieldType, str]
+    duplicate_revisions: tuple[str, ...] = ()
 
     def get(self, field_type: TitleBlockFieldType) -> Optional[str]:
         return self.values.get(field_type) or None
@@ -46,6 +50,7 @@ def extract_title_block_info(pdf_path: Path, template: Template) -> Optional[Tit
     if not template.title_block_fields:
         return None
     values: dict[TitleBlockFieldType, str] = {}
+    duplicate_revisions: tuple[str, ...] = ()
     with PDFIUM_LOCK:
         try:
             doc = pdfium.PdfDocument(str(pdf_path))
@@ -66,12 +71,15 @@ def extract_title_block_info(pdf_path: Path, template: Template) -> Optional[Tit
                 if text:
                     values[TitleBlockFieldType(tb_field.field_type)] = text
             if revision_fields:
-                values.update(_extract_newest_revision_row(doc, page_count, revision_fields, page_cache))
+                row_values, duplicate_revisions = _extract_newest_revision_row(
+                    doc, page_count, revision_fields, page_cache
+                )
+                values.update(row_values)
         finally:
             for ctx in page_cache.values():
                 ctx.close()
             doc.close()
-    return TitleBlockInfo(values=values)
+    return TitleBlockInfo(values=values, duplicate_revisions=duplicate_revisions)
 
 
 def _dedupe_by_field_type(fields: list[TitleBlockField]) -> list[TitleBlockField]:
@@ -182,14 +190,18 @@ def _extract_newest_revision_row(
     page_count: int,
     revision_fields: list[TitleBlockField],
     page_cache: dict[int, _PageContext],
-) -> dict[TitleBlockFieldType, str]:
+) -> tuple[dict[TitleBlockFieldType, str], tuple[str, ...]]:
     """Each revision field's `rect` is drawn tightly around REV 0 (the
     bottom row, which never moves - see TitleBlockField's docstring).
     Walks upward in rect.height steps (row index 0 = REV 0, 1 = the row
     above it, ...) until a row comes back completely blank across every
-    revision field, then picks whichever row within that filled block is
-    actually the newest: highest REV number if a REV_NUMBER field was
-    drawn, otherwise simply the last (topmost) filled row."""
+    revision field. The newest row is always the LAST (topmost) filled
+    row found that way - not whichever row happens to have the highest
+    REV number, since that number is exactly what a mis-numbered/
+    duplicated revision entry would get wrong. Also returns any REV
+    number that appears on more than one scanned row (a data-entry
+    mistake in the file itself, not something a single newest-row
+    comparison can catch)."""
     per_field_rows: dict[TitleBlockFieldType, list[str]] = {
         TitleBlockFieldType(f.field_type): [] for f in revision_fields
     }
@@ -229,35 +241,34 @@ def _extract_newest_revision_row(
             break
         last_filled_index = i
     if last_filled_index < 0:
-        return {}
+        return {}, ()
 
-    newest_index = _pick_newest_row_index(per_field_rows, last_filled_index)
-    return {
+    duplicates = _find_duplicate_revisions(per_field_rows.get(TitleBlockFieldType.REV_NUMBER), last_filled_index)
+    newest_index = last_filled_index
+    values = {
         field_type: rows[newest_index]
         for field_type, rows in per_field_rows.items()
         if newest_index < len(rows) and rows[newest_index]
     }
+    return values, duplicates
 
 
-def _pick_newest_row_index(
-    per_field_rows: dict[TitleBlockFieldType, list[str]], last_filled_index: int
-) -> int:
-    rev_number_rows = per_field_rows.get(TitleBlockFieldType.REV_NUMBER)
-    if rev_number_rows:
-        best_index: Optional[int] = None
-        best_value: Optional[int] = None
-        for i, text in enumerate(rev_number_rows):
-            digits = re.sub(r"[^\d]", "", text)
-            if not digits:
-                continue
-            value = int(digits)
-            if best_value is None or value > best_value:
-                best_value, best_index = value, i
-        if best_index is not None:
-            return best_index
-    # No REV_NUMBER field, or none of its rows parsed as a number - the
-    # last filled row (topmost of the used block) is the newest.
-    return last_filled_index
+def _find_duplicate_revisions(
+    rev_number_rows: Optional[list[str]], last_filled_index: int
+) -> tuple[str, ...]:
+    if not rev_number_rows:
+        return ()
+    seen: dict[str, int] = {}
+    duplicates: list[str] = []
+    for text in rev_number_rows[: last_filled_index + 1]:
+        digits = re.sub(r"[^\d]", "", text)
+        if not digits:
+            continue
+        seen[digits] = seen.get(digits, 0) + 1
+    for value, count in seen.items():
+        if count > 1:
+            duplicates.append(value)
+    return tuple(sorted(duplicates, key=int))
 
 
 def _extract_rect_text(ctx: _PageContext, raw_rect: Rect) -> str:
@@ -301,6 +312,16 @@ def validate_title_block(
             TitleBlockWarning(
                 f"Drawing No. '{drawing_no}' does not appear in the file name.",
                 (TitleBlockFieldType.DRAWING_NO,),
+            )
+        )
+
+    if info.duplicate_revisions:
+        listed = ", ".join(info.duplicate_revisions)
+        warnings.append(
+            TitleBlockWarning(
+                f"The revision table has more than one row with REV {listed} - each REV number "
+                "should appear only once.",
+                (TitleBlockFieldType.REV_NUMBER,),
             )
         )
 
