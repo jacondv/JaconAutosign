@@ -181,6 +181,15 @@ chặn ký**.
 - Danh sách "Title block fields" hiển thị cạnh danh sách Signature
   boxes, có Edit/Delete riêng. Hoàn toàn tùy chọn - template không khai
   báo field nào thì tính năng tự tắt cho template đó.
+- **Mỗi field_type chỉ được khai báo 1 lần trong 1 template** - vẽ/sửa
+  thêm field trùng loại (VD 2 field cùng là "Revision table - newest
+  REV No.") bị chặn ngay khi tạo/sửa, kèm giải thích lý do. Trước khi
+  có chặn này, 2 field cùng loại revision-row sẽ bị gộp lẫn dữ liệu quét
+  (2 khung khác row-height append chung 1 danh sách) làm lệch chỉ số
+  "dòng mới nhất" → CHK'D/APP'D/DRAWN bị so sai dù logic so sánh đúng.
+  `_dedupe_by_field_type` trong `title_block_service.py` vẫn giữ lại
+  như 1 lớp phòng vệ cho template cũ tạo từ trước khi có chặn này (chỉ
+  giữ field đầu tiên, bỏ field trùng loại phía sau).
 
 ### 2. Trích xuất (`extract_title_block_info`, `_extract_newest_revision_row`)
 - Field cố định (Drawing No., DRAWN/CHK'D/APP'D): đọc thẳng text trong

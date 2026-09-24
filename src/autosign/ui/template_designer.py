@@ -281,10 +281,20 @@ class TemplateDesignerScreen(QWidget):
         dialog = TitleBlockFieldDialog(current_page_number=self._current_page + 1, parent=self)
         if dialog.exec() != TitleBlockFieldDialog.DialogCode.Accepted:
             return
+        field_type = dialog.result_field_type()
+        if self._title_field_type_used(field_type, exclude_field_id=None):
+            QMessageBox.warning(
+                self,
+                "Field type already used",
+                f"This template already has a '{dialog.result_label()}' field. Having two "
+                "fields of the same type corrupts extraction (their scanned rows get mixed "
+                "together) - edit the existing one instead, or pick a different field type.",
+            )
+            return
         field_id = f"{_TITLE_FIELD_PREFIX}{uuid.uuid4().hex[:8]}"
         tb_field = TitleBlockField(
             field_id=field_id,
-            field_type=dialog.result_field_type(),
+            field_type=field_type,
             page_ref=dialog.result_page_ref(),
             rect=rect,
             page_size_at_design_time=page_size,
@@ -409,10 +419,27 @@ class TemplateDesignerScreen(QWidget):
         )
         if dialog.exec() != TitleBlockFieldDialog.DialogCode.Accepted:
             return
-        tb_field.field_type = dialog.result_field_type()
+        new_type = dialog.result_field_type()
+        if self._title_field_type_used(new_type, exclude_field_id=field_id):
+            QMessageBox.warning(
+                self,
+                "Field type already used",
+                f"This template already has a '{dialog.result_label()}' field. Having two "
+                "fields of the same type corrupts extraction (their scanned rows get mixed "
+                "together) - pick a different field type.",
+            )
+            return
+        tb_field.field_type = new_type
         tb_field.page_ref = dialog.result_page_ref()
         self._refresh_title_field_list()
         self._sync_canvas_boxes()
+
+    def _title_field_type_used(self, field_type, exclude_field_id: str | None) -> bool:
+        return any(
+            f.field_type == field_type
+            for fid, f in self._title_fields.items()
+            if fid != exclude_field_id
+        )
 
     def _delete_selected_title_field(self) -> None:
         item = self._title_field_list.currentItem()

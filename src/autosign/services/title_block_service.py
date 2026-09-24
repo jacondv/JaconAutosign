@@ -54,8 +54,9 @@ def extract_title_block_info(pdf_path: Path, template: Template) -> Optional[Tit
         try:
             page_count = len(doc)
             page_cache: dict[int, _PageContext] = {}
-            fixed_fields = [f for f in template.title_block_fields if not f.field_type.is_revision_row]
-            revision_fields = [f for f in template.title_block_fields if f.field_type.is_revision_row]
+            fields = _dedupe_by_field_type(template.title_block_fields)
+            fixed_fields = [f for f in fields if not f.field_type.is_revision_row]
+            revision_fields = [f for f in fields if f.field_type.is_revision_row]
             for tb_field in fixed_fields:
                 page_index = tb_field.page_ref.resolve_index(page_count)
                 if page_index is None:
@@ -71,6 +72,25 @@ def extract_title_block_info(pdf_path: Path, template: Template) -> Optional[Tit
                 ctx.close()
             doc.close()
     return TitleBlockInfo(values=values)
+
+
+def _dedupe_by_field_type(fields: list[TitleBlockField]) -> list[TitleBlockField]:
+    """A template should have at most one field per field_type - two fields
+    of the same revision-row type (e.g. both marked "REV No.") would append
+    into the SAME row list in _extract_newest_revision_row, interleaving
+    two unrelated boxes' scan results and corrupting which row index is
+    "the newest" for every other revision column. Keeps only the first
+    field seen for each type (template save order) rather than letting a
+    template-design mistake silently produce wrong warnings."""
+    seen: set[TitleBlockFieldType] = set()
+    result = []
+    for f in fields:
+        field_type = TitleBlockFieldType(f.field_type)
+        if field_type in seen:
+            continue
+        seen.add(field_type)
+        result.append(f)
+    return result
 
 
 @dataclass
