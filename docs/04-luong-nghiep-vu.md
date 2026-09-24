@@ -171,8 +171,15 @@ chặn ký**.
 - Thêm hẳn 1 "Draw mode" bên cạnh khung chữ ký: **Signature box** (như
   cũ) hoặc **Title block field** (mới). Ở mode field, vẽ xong sẽ hiện
   hộp thoại chọn loại field (`TitleBlockFieldDialog`): `Drawing No.`,
-  `DRAWN/CHK'D/APP'D - name/date`, hoặc `Revision table - newest ...`
-  (REV No./BY/CKD/APP/DATE), và trang chứa khung tên (trang này/đầu/cuối).
+  `DRAWN/CHK'D/APP'D - name/date`, `SHEET`, hoặc `Revision table -
+  newest ...` (REV No./BY/CKD/APP/DATE); và trang chứa khung tên -
+  **trang này (cố định)** / **đầu** / **cuối** / hoặc **"Every page"**
+  (cùng 1 vị trí lặp lại trên mỗi trang - dùng cho bản vẽ nhiều trang mà
+  mỗi trang đều có khung tên riêng, xem mục "Nhiều trang" bên dưới).
+- **SHEET** trích được dạng `"<số hiện tại> OF <tổng>"` (VD `1 OF 3`) -
+  so với **số trang thật của trang đang kiểm tra** và **tổng số trang
+  thật của file** (không phải với con số ghi tay trong bản vẽ) - lệch
+  cái nào cũng cảnh báo.
 - Với field loại "Revision table": vẽ khung **sát đúng dòng REV 0** (dòng
   dưới cùng, vị trí cố định, không đổi) - không cần nhập thêm gì khác.
   Chiều cao khung tự động dùng làm khoảng cách giữa các dòng; app quét
@@ -229,9 +236,12 @@ chặn ký**.
 1. **Drawing No. khớp tên file**: số/ký hiệu trích được chỉ cần là 1
    cụm con xuất hiện trong tên file (`stem`), VD `13080059` khớp với
    file `13080059-Rev0.pdf`.
-2. **Không có 2 dòng revision trùng số REV** - xem mục "Trùng REV" ở
+2. **SHEET khớp trang thật**: `"<hiện tại> OF <tổng>"` phải bằng đúng
+   (số trang thật của trang đang kiểm tra, tổng số trang thật của file)
+   - xem mục "Nhiều trang" bên dưới.
+3. **Không có 2 dòng revision trùng số REV** - xem mục "Trùng REV" ở
    trên.
-3. **REV (ô riêng cạnh Drawing No. trong khung tên) = REV mới nhất
+4. **REV (ô riêng cạnh Drawing No. trong khung tên) = REV mới nhất
    trong bảng revision**: field `TITLE_REV_NUMBER` (ô "REV" nhỏ, độc
    lập với bảng revision - xem ảnh mẫu) phải khớp với `REV_NUMBER` (số
    REV của dòng mới nhất do bảng revision quét ra) - lệch nhau → cảnh
@@ -252,7 +262,28 @@ chặn ký**.
    buộc phải có đủ cả 3 ngày mới kiểm tra được - thiếu 1 ngày ở giữa thì
    vẫn so được cặp còn lại.
 
-### 4. Hiển thị cảnh báo
+### 4. Nhiều trang - mỗi trang kiểm tra độc lập
+- `extract_title_block_info(pdf_path, template)` trả về
+  **`dict[page_index, TitleBlockInfo]`** - 1 kết quả riêng cho **mỗi
+  trang** mà template có ít nhất 1 field áp dụng tới, không còn là 1
+  kết quả chung cho cả file.
+- Field nào áp dụng cho trang nào do `page_ref` của field quyết định
+  (dùng lại đúng cơ chế `PageRefType` của Signature box): field
+  **"Every page"** áp dụng cho **mọi trang** (dùng chung 1 khung, lặp
+  lại đúng vị trí trên từng trang - hợp cho `SHEET`, hoặc `Drawing No.`
+  nếu bản vẽ lặp lại khung tên đầy đủ trên mỗi trang); field "trang
+  này/đầu/cuối" chỉ áp dụng cho đúng 1 trang cố định (hợp cho những
+  thông tin chỉ xuất hiện 1 lần trong cả file, VD bảng revision chỉ có
+  ở trang đầu dù các trang sau vẫn có SHEET riêng).
+- `validate_title_block(...)` được gọi **riêng cho từng trang** với
+  đúng `page_number`/`page_count` của trang đó - cảnh báo của trang 2
+  không ảnh hưởng/trộn lẫn với trang 1.
+- Trên preview: chỉ hiện cảnh báo/box của **trang đang xem**. Trong
+  danh sách file: số `⚠ N` là **tổng cảnh báo trên tất cả các trang**
+  của file đó; tooltip liệt kê kèm tiền tố `Page N:` nếu file có nhiều
+  hơn 1 trang được kiểm tra.
+
+### 5. Hiển thị cảnh báo
 - **Thời điểm tính lại**: chỉ khi đang **xem trước 1 file cụ thể** - lúc
   chọn file trong danh sách (`_load_preview`) hoặc đổi Template trong
   khi file đó đang mở (`_on_template_changed`). Không chạy nền cho toàn
