@@ -18,6 +18,7 @@ _FIELD_LABELS: dict[TitleBlockFieldType, str] = {
     TitleBlockFieldType.APPD_NAME: "APP'D - name",
     TitleBlockFieldType.APPD_DATE: "APP'D - date",
     TitleBlockFieldType.TITLE_REV_NUMBER: "REV No. (title block box, next to Drawing No.)",
+    TitleBlockFieldType.SHEET: "SHEET (\"<current> OF <total>\")",
     TitleBlockFieldType.REV_NUMBER: "Revision table - newest REV No.",
     TitleBlockFieldType.REV_BY: "Revision table - newest BY",
     TitleBlockFieldType.REV_CKD: "Revision table - newest CKD",
@@ -28,6 +29,7 @@ _FIELD_LABELS: dict[TitleBlockFieldType, str] = {
 _PAGE_THIS = ("this", None)
 _PAGE_FIRST = ("first", None)
 _PAGE_LAST = ("last", None)
+_PAGE_ALL = ("all", None)
 
 
 class TitleBlockFieldDialog(QDialog):
@@ -60,15 +62,20 @@ class TitleBlockFieldDialog(QDialog):
         self._row_hint.setWordWrap(True)
 
         self._page_combo = QComboBox()
-        self._page_combo.addItem(f"This page (page {current_page_number}, fixed)", _PAGE_THIS)
+        self._page_combo.addItem(f"This page only (page {current_page_number}, fixed)", _PAGE_THIS)
         self._page_combo.addItem("First page", _PAGE_FIRST)
         self._page_combo.addItem("Last page", _PAGE_LAST)
+        self._page_combo.addItem(
+            "Every page (same spot on each page - for multi-page drawings)", _PAGE_ALL
+        )
         if page_ref is not None:
             ref_type = PageRefType(page_ref.type)
             if ref_type == PageRefType.FIRST:
                 self._page_combo.setCurrentIndex(1)
             elif ref_type == PageRefType.LAST:
                 self._page_combo.setCurrentIndex(2)
+            elif ref_type == PageRefType.ALL:
+                self._page_combo.setCurrentIndex(3)
             else:
                 self._page_combo.setCurrentIndex(0)
 
@@ -105,4 +112,6 @@ class TitleBlockFieldDialog(QDialog):
             return PageRef(type=PageRefType.FIRST)
         if kind == "last":
             return PageRef(type=PageRefType.LAST)
+        if kind == "all":
+            return PageRef(type=PageRefType.ALL)
         return PageRef(type=PageRefType.ABSOLUTE, page_number=self._current_page_number)

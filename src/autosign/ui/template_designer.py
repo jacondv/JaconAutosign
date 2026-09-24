@@ -224,7 +224,7 @@ class TemplateDesignerScreen(QWidget):
         return [
             tb_field
             for tb_field in self._title_fields.values()
-            if tb_field.page_ref.resolve_index(self._pdf_info.page_count) == self._current_page
+            if self._current_page in tb_field.page_ref.resolve_indices(self._pdf_info.page_count)
         ]
 
     def _sync_canvas_boxes(self) -> None:

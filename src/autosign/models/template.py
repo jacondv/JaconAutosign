@@ -171,6 +171,9 @@ class TitleBlockFieldType(str, Enum):
     # REV_NUMBER below (the REV column of the revision-history table's
     # newest row). validate_title_block() cross-checks the two match.
     TITLE_REV_NUMBER = "title_rev_number"
+    # "<current> OF <total>" (e.g. "1 OF 3") - checked against the actual
+    # page this field's rect is found on and the file's real page count.
+    SHEET = "sheet"
     REV_NUMBER = "rev_number"
     REV_BY = "rev_by"
     REV_CKD = "rev_ckd"

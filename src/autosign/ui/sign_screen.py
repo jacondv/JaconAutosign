@@ -93,8 +93,10 @@ class SignScreen(QWidget):
 
         self._results: dict[Path, object] = {}
         self._project_folder_cache: dict[Path, list[Path]] = {}
-        self._title_block_warnings: dict[Path, list] = {}
-        self._title_block_info: dict[Path, object] = {}
+        # Keyed by file, then by 0-based page index - every page is checked
+        # independently (see _refresh_title_block_warnings).
+        self._title_block_warnings: dict[Path, dict[int, list]] = {}
+        self._title_block_info: dict[Path, dict[int, object]] = {}
         self._current_file: Path | None = None
         self._current_pdf_info: PdfInfo | None = None
         self._current_signed_pages: set[int] = set()
@@ -278,11 +280,15 @@ class SignScreen(QWidget):
         self._settings_service.save(settings)
 
     def _refresh_file_list(self) -> None:
-        warning_messages = {
-            path: [w.message for w in warnings]
-            for path, warnings in self._title_block_warnings.items()
-            if warnings
-        }
+        warning_messages = {}
+        for path, per_page in self._title_block_warnings.items():
+            messages = [
+                f"Page {page_index + 1}: {w.message}" if len(per_page) > 1 else w.message
+                for page_index, warnings in sorted(per_page.items())
+                for w in warnings
+            ]
+            if messages:
+                warning_messages[path] = messages
         self._file_panel.refresh(self._compute_page_counts(), warning_messages)
         if self._current_file is not None and self._current_file not in self._file_panel.files:
             self._current_file = None
@@ -317,30 +323,38 @@ class SignScreen(QWidget):
 
     # ------------------------------------------------------- title block check
     def _refresh_title_block_warnings(self, path: Path) -> None:
-        info, warnings = self._compute_title_block_info_and_warnings(path)
-        self._title_block_info[path] = info
-        self._title_block_warnings[path] = warnings
+        """Every page is checked independently - a multi-page drawing where
+        each sheet repeats its own title block gets its own set of warnings
+        per page (see title_block_service.py's per-page extract_title_block_info),
+        not one aggregated result for the whole file."""
+        per_page_info, per_page_warnings = self._compute_title_block_info_and_warnings(path)
+        self._title_block_info[path] = per_page_info
+        self._title_block_warnings[path] = per_page_warnings
         self._refresh_file_list()
 
     def _compute_title_block_info_and_warnings(self, path: Path):
         template = self._current_template()
-        if template is None or not template.title_block_fields:
-            return None, []
+        if template is None or not template.title_block_fields or self._current_pdf_info is None:
+            return {}, {}
         try:
-            info = extract_title_block_info(path, template)
+            per_page_info = extract_title_block_info(path, template)
         except Exception:
-            return None, []
-        if info is None:
-            return None, []
+            return {}, {}
         settings = self._settings_service.load()
-        warnings = validate_title_block(
-            info,
-            path,
-            datetime.now().astimezone(),
-            expected_ckd=settings.expected_ckd,
-            expected_app=settings.expected_app,
-        )
-        return info, warnings
+        page_count = self._current_pdf_info.page_count
+        per_page_warnings = {
+            page_index: validate_title_block(
+                info,
+                path,
+                datetime.now().astimezone(),
+                expected_ckd=settings.expected_ckd,
+                expected_app=settings.expected_app,
+                page_number=page_index + 1,
+                page_count=page_count,
+            )
+            for page_index, info in per_page_info.items()
+        }
+        return per_page_info, per_page_warnings
 
     def _resolve_output_path(self, source_path: Path) -> Path:
         settings = self._settings_service.load()
@@ -384,12 +398,16 @@ class SignScreen(QWidget):
                     pixel_boxes[box.box_id] = pdf_rect_to_pixel(rect, actual_size, dpi)
                     labels[box.box_id] = box.label
 
+            # Only THIS page's own warnings/info - each page is checked
+            # independently, so a mismatch on page 2 shouldn't highlight
+            # boxes while looking at page 1.
             warned_field_types = set()
-            for tb_warning in self._title_block_warnings.get(self._current_file, []):
+            for tb_warning in self._title_block_warnings.get(self._current_file, {}).get(page_index, []):
                 warned_field_types.update(tb_warning.field_types)
-            tb_info = self._title_block_info.get(self._current_file)
+            tb_info = self._title_block_info.get(self._current_file, {}).get(page_index)
             for tb_field in template.title_block_fields:
-                if tb_field.page_ref.resolve_index(self._current_pdf_info.page_count) != page_index:
+                tb_indices = tb_field.page_ref.resolve_indices(self._current_pdf_info.page_count)
+                if page_index not in tb_indices:
                     continue
                 # A revision-row field's drawn rect is only row slot #1 (REV
                 # 0) - the row actually used is tb_info.newest_row_index

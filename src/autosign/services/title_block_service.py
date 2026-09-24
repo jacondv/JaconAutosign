@@ -2,9 +2,18 @@
 PDF file, and cross-checks them: the values must be internally consistent
 (CHK'D/APP'D on the main title block must match the newest revision row),
 optionally match a fixed expected value from Settings, the Drawing No. must
-appear in the file name, and none of the dates should be later than the
-actual signing time. All checks are warnings only - see sign_screen.py,
-which never blocks signing on these, only surfaces them.
+appear in the file name, SHEET must match the real page/page-count, and none
+of the dates should be later than the actual signing time. All checks are
+warnings only - see sign_screen.py, which never blocks signing on these,
+only surfaces them.
+
+Every page is checked INDEPENDENTLY (extract_title_block_info returns one
+TitleBlockInfo per page a field applies to) - a multi-page drawing where
+every sheet repeats its own title block gets its own set of warnings per
+page, not one result for the whole file. A field only shows up on the
+page(s) its page_ref resolves to: "Every page" (PageRefType.ALL) for a
+field repeated identically on each sheet, "First page"/"Last page"/a fixed
+page number for a field that only appears once in the whole file.
 """
 from __future__ import annotations
 
@@ -20,6 +29,7 @@ from ..models import Rect, Template, TitleBlockField, TitleBlockFieldType
 from ..pdfium_lock import PDFIUM_LOCK
 
 _DATE_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y", "%d/%m/%y", "%Y-%m-%d", "%d %b %Y", "%d-%b-%y")
+_SHEET_PATTERN = re.compile(r"(\d+)\D+(\d+)")
 
 
 @dataclass(frozen=True)
@@ -51,45 +61,59 @@ class TitleBlockWarning:
     field_types: tuple[TitleBlockFieldType, ...]  # which extracted field(s) this concerns
 
 
-def extract_title_block_info(pdf_path: Path, template: Template) -> Optional[TitleBlockInfo]:
-    """None if the template has no title-block fields configured at all -
-    callers use that to skip the whole feature for templates that don't use
-    it, same as "no signature boxes" is a no-op elsewhere."""
+def extract_title_block_info(pdf_path: Path, template: Template) -> dict[int, TitleBlockInfo]:
+    """One TitleBlockInfo per page (0-based index) that at least one
+    title-block field applies to. Empty dict if the template has no
+    title-block fields configured at all - callers use that to skip the
+    whole feature for templates that don't use it, same as "no signature
+    boxes" is a no-op elsewhere."""
     if not template.title_block_fields:
-        return None
-    values: dict[TitleBlockFieldType, str] = {}
-    duplicate_revisions: tuple[str, ...] = ()
-    newest_row_index: Optional[int] = None
-    duplicate_row_indices: tuple[int, ...] = ()
+        return {}
+    fields = _dedupe_by_field_type(template.title_block_fields)
+    results: dict[int, TitleBlockInfo] = {}
     with PDFIUM_LOCK:
         try:
             doc = pdfium.PdfDocument(str(pdf_path))
         except Exception:
-            return TitleBlockInfo(values={})
+            return {}
         try:
             page_count = len(doc)
             page_cache: dict[int, _PageContext] = {}
-            fields = _dedupe_by_field_type(template.title_block_fields)
-            fixed_fields = [f for f in fields if not f.field_type.is_revision_row]
-            revision_fields = [f for f in fields if f.field_type.is_revision_row]
-            for tb_field in fixed_fields:
-                page_index = tb_field.page_ref.resolve_index(page_count)
-                if page_index is None:
+            for page_index in range(page_count):
+                applicable = [f for f in fields if page_index in f.page_ref.resolve_indices(page_count)]
+                if not applicable:
                     continue
-                ctx = _get_page_context(doc, page_index, page_cache)
-                text = _extract_rect_text(ctx, _design_rect_to_raw(tb_field, ctx))
-                if text:
-                    values[TitleBlockFieldType(tb_field.field_type)] = text
-            if revision_fields:
-                row_result = _extract_newest_revision_row(doc, page_count, revision_fields, page_cache)
-                values.update(row_result.values)
-                duplicate_revisions = row_result.duplicate_revisions
-                newest_row_index = row_result.newest_row_index
-                duplicate_row_indices = row_result.duplicate_row_indices
+                results[page_index] = _extract_page_info(doc, page_index, applicable, page_cache)
         finally:
             for ctx in page_cache.values():
                 ctx.close()
             doc.close()
+    return results
+
+
+def _extract_page_info(
+    doc: "pdfium.PdfDocument",
+    page_index: int,
+    fields: list[TitleBlockField],
+    page_cache: dict[int, _PageContext],
+) -> TitleBlockInfo:
+    values: dict[TitleBlockFieldType, str] = {}
+    fixed_fields = [f for f in fields if not f.field_type.is_revision_row]
+    revision_fields = [f for f in fields if f.field_type.is_revision_row]
+    for tb_field in fixed_fields:
+        ctx = _get_page_context(doc, page_index, page_cache)
+        text = _extract_rect_text(ctx, _design_rect_to_raw(tb_field, ctx))
+        if text:
+            values[TitleBlockFieldType(tb_field.field_type)] = text
+    duplicate_revisions: tuple[str, ...] = ()
+    newest_row_index: Optional[int] = None
+    duplicate_row_indices: tuple[int, ...] = ()
+    if revision_fields:
+        row_result = _extract_newest_revision_row(doc, page_index, revision_fields, page_cache)
+        values.update(row_result.values)
+        duplicate_revisions = row_result.duplicate_revisions
+        newest_row_index = row_result.newest_row_index
+        duplicate_row_indices = row_result.duplicate_row_indices
     return TitleBlockInfo(
         values=values,
         duplicate_revisions=duplicate_revisions,
@@ -211,7 +235,7 @@ class _RevisionRowResult:
 
 def _extract_newest_revision_row(
     doc: "pdfium.PdfDocument",
-    page_count: int,
+    page_index: int,
     revision_fields: list[TitleBlockField],
     page_cache: dict[int, _PageContext],
 ) -> _RevisionRowResult:
@@ -233,11 +257,7 @@ def _extract_newest_revision_row(
     for i in range(_MAX_SCAN_ROWS):
         any_non_blank = False
         for tb_field in revision_fields:
-            page_index = tb_field.page_ref.resolve_index(page_count)
             field_type = TitleBlockFieldType(tb_field.field_type)
-            if page_index is None:
-                per_field_rows[field_type].append("")
-                continue
             ctx = _get_page_context(doc, page_index, page_cache)
             # Row-shifting happens in the SAME visual/design space the rect
             # was drawn in, before converting to raw space - shifting the
@@ -337,7 +357,14 @@ def validate_title_block(
     sign_time: datetime,
     expected_ckd: Optional[str] = None,
     expected_app: Optional[str] = None,
+    page_number: Optional[int] = None,
+    page_count: Optional[int] = None,
 ) -> list[TitleBlockWarning]:
+    """`page_number` (1-based) and `page_count` are the file's REAL page
+    position/total - required only to check the SHEET field ("<current> OF
+    <total>"); every other rule is page-agnostic. Pass the values for
+    whichever page `info` was extracted from (see extract_title_block_info,
+    which returns one TitleBlockInfo per page)."""
     warnings: list[TitleBlockWarning] = []
 
     drawing_no = info.get(TitleBlockFieldType.DRAWING_NO)
@@ -348,6 +375,20 @@ def validate_title_block(
                 (TitleBlockFieldType.DRAWING_NO,),
             )
         )
+
+    sheet = info.get(TitleBlockFieldType.SHEET)
+    if sheet and page_number is not None and page_count is not None:
+        match = _SHEET_PATTERN.search(sheet)
+        if match:
+            sheet_current, sheet_total = int(match.group(1)), int(match.group(2))
+            if sheet_current != page_number or sheet_total != page_count:
+                warnings.append(
+                    TitleBlockWarning(
+                        f"SHEET ('{sheet}') does not match the actual page "
+                        f"({page_number} of {page_count}).",
+                        (TitleBlockFieldType.SHEET,),
+                    )
+                )
 
     if info.duplicate_revisions:
         listed = ", ".join(info.duplicate_revisions)
