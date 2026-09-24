@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..models import SignPageScope
+from ..models import Rect, SignPageScope, TitleBlockFieldType
 from ..services import (
     PdfInfo,
     PdfInspectService,
@@ -391,7 +391,25 @@ class SignScreen(QWidget):
             for tb_field in template.title_block_fields:
                 if tb_field.page_ref.resolve_index(self._current_pdf_info.page_count) != page_index:
                     continue
-                rect = tb_field.rect
+                # A revision-row field's drawn rect is only row slot #1 (REV
+                # 0) - the row actually used is tb_info.newest_row_index
+                # rows above it (see title_block_service.py). Shift to that
+                # REAL on-page position so the highlighted box lands on the
+                # row the extracted value/warning actually came from,
+                # rather than always at the static template position.
+                design_rect = tb_field.rect
+                if (
+                    tb_field.field_type.is_revision_row
+                    and tb_info is not None
+                    and tb_info.newest_row_index is not None
+                ):
+                    design_rect = Rect(
+                        x=design_rect.x,
+                        y=design_rect.y + tb_info.newest_row_index * design_rect.height,
+                        width=design_rect.width,
+                        height=design_rect.height,
+                    )
+                rect = design_rect
                 if actual_size.differs_from(tb_field.page_size_at_design_time):
                     rect = rect.scaled_to(tb_field.page_size_at_design_time, actual_size)
                 pixel_boxes[tb_field.field_id] = pdf_rect_to_pixel(rect, actual_size, dpi)
@@ -406,6 +424,26 @@ class SignScreen(QWidget):
                     # "checked, looks fine", distinct from the default blue
                     # of a field that's simply never been validated.
                     ok_ids.add(tb_field.field_id)
+
+                # Extra red boxes at every row a duplicate REV number was
+                # found on (not just the newest row) - REV No. is the only
+                # column this applies to, since that's what's duplicated.
+                if (
+                    tb_field.field_type == TitleBlockFieldType.REV_NUMBER
+                    and tb_info is not None
+                ):
+                    for row_idx in tb_info.duplicate_row_indices:
+                        dup_rect = Rect(
+                            x=tb_field.rect.x,
+                            y=tb_field.rect.y + row_idx * tb_field.rect.height,
+                            width=tb_field.rect.width,
+                            height=tb_field.rect.height,
+                        )
+                        if actual_size.differs_from(tb_field.page_size_at_design_time):
+                            dup_rect = dup_rect.scaled_to(tb_field.page_size_at_design_time, actual_size)
+                        dup_id = f"{tb_field.field_id}-dup-{row_idx}"
+                        pixel_boxes[dup_id] = pdf_rect_to_pixel(dup_rect, actual_size, dpi)
+                        warning_ids.add(dup_id)
         self._viewer.set_boxes(pixel_boxes, labels, warning_ids, ok_ids)
 
     # -------------------------------------------------------------- template

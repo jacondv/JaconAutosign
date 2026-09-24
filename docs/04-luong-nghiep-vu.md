@@ -271,6 +271,16 @@ chặn ký**.
   - Không hiện tên field kỹ thuật (VD `rev_ckd`) đè lên preview - chỉ
     màu viền nói lên trạng thái. Tên field vẫn hiện trong Template
     Designer để người thiết kế phân biệt được các khung.
+  - **Box vẽ đúng vị trí thật, không phải vị trí khung mẫu**: khung mẫu
+    (`tb_field.rect`) chỉ đánh dấu slot #1 (REV 0), nhưng box hiển thị
+    trên preview được **dịch lên đúng dòng thực tế** đang dùng để so
+    sánh (`newest_row_index` dòng, từ `TitleBlockInfo`) - nên box đỏ
+    luôn nằm ngay tại dòng revision thật gây ra cảnh báo, không phải ở
+    vị trí REV 0 cố định.
+  - **Trùng REV**: ngoài box ở dòng mới nhất, vẽ thêm 1 box đỏ riêng tại
+    **từng dòng** bị trùng số REV (VD cả dòng REV=2 thứ nhất lẫn thứ
+    hai), giúp thấy ngay 2 dòng nào đang xung đột thay vì chỉ có 1 cảnh
+    báo text chung chung.
 - **Trong danh sách file**: file có cảnh báo hiện thêm `⚠ N` sau tên,
   chữ màu đỏ, tooltip liệt kê đầy đủ nội dung từng cảnh báo.
 - Không có hộp thoại chặn ký nào - người dùng tự quyết định có ký tiếp

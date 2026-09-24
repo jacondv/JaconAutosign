@@ -28,10 +28,18 @@ class TitleBlockInfo:
     None for any field_type the template doesn't define. duplicate_revisions
     lists any REV number that appears on more than one scanned row of the
     revision table (see _extract_newest_revision_row) - a data-entry mistake
-    validate_title_block() can't express as a single field-vs-field warning."""
+    validate_title_block() can't express as a single field-vs-field warning.
+
+    newest_row_index/duplicate_row_indices are the row offsets (0 = REV 0,
+    the drawn box's own position, 1 = one row above it, ...) the UI needs to
+    draw a warning box at the row's REAL on-page position instead of always
+    at the template's static slot #1 - see sign_screen.py's
+    _sync_preview_overlay."""
 
     values: dict[TitleBlockFieldType, str]
     duplicate_revisions: tuple[str, ...] = ()
+    newest_row_index: Optional[int] = None
+    duplicate_row_indices: tuple[int, ...] = ()
 
     def get(self, field_type: TitleBlockFieldType) -> Optional[str]:
         return self.values.get(field_type) or None
@@ -51,6 +59,8 @@ def extract_title_block_info(pdf_path: Path, template: Template) -> Optional[Tit
         return None
     values: dict[TitleBlockFieldType, str] = {}
     duplicate_revisions: tuple[str, ...] = ()
+    newest_row_index: Optional[int] = None
+    duplicate_row_indices: tuple[int, ...] = ()
     with PDFIUM_LOCK:
         try:
             doc = pdfium.PdfDocument(str(pdf_path))
@@ -71,15 +81,21 @@ def extract_title_block_info(pdf_path: Path, template: Template) -> Optional[Tit
                 if text:
                     values[TitleBlockFieldType(tb_field.field_type)] = text
             if revision_fields:
-                row_values, duplicate_revisions = _extract_newest_revision_row(
-                    doc, page_count, revision_fields, page_cache
-                )
-                values.update(row_values)
+                row_result = _extract_newest_revision_row(doc, page_count, revision_fields, page_cache)
+                values.update(row_result.values)
+                duplicate_revisions = row_result.duplicate_revisions
+                newest_row_index = row_result.newest_row_index
+                duplicate_row_indices = row_result.duplicate_row_indices
         finally:
             for ctx in page_cache.values():
                 ctx.close()
             doc.close()
-    return TitleBlockInfo(values=values, duplicate_revisions=duplicate_revisions)
+    return TitleBlockInfo(
+        values=values,
+        duplicate_revisions=duplicate_revisions,
+        newest_row_index=newest_row_index,
+        duplicate_row_indices=duplicate_row_indices,
+    )
 
 
 def _dedupe_by_field_type(fields: list[TitleBlockField]) -> list[TitleBlockField]:
@@ -185,12 +201,20 @@ def _visual_rect_to_raw(rect: Rect, visual_width: float, visual_height: float, r
 _MAX_SCAN_ROWS = 200
 
 
+@dataclass(frozen=True)
+class _RevisionRowResult:
+    values: dict[TitleBlockFieldType, str]
+    duplicate_revisions: tuple[str, ...]
+    newest_row_index: Optional[int]
+    duplicate_row_indices: tuple[int, ...]
+
+
 def _extract_newest_revision_row(
     doc: "pdfium.PdfDocument",
     page_count: int,
     revision_fields: list[TitleBlockField],
     page_cache: dict[int, _PageContext],
-) -> tuple[dict[TitleBlockFieldType, str], tuple[str, ...]]:
+) -> _RevisionRowResult:
     """Each revision field's `rect` is drawn tightly around REV 0 (the
     bottom row, which never moves - see TitleBlockField's docstring).
     Walks upward in rect.height steps (row index 0 = REV 0, 1 = the row
@@ -241,34 +265,44 @@ def _extract_newest_revision_row(
             break
         last_filled_index = i
     if last_filled_index < 0:
-        return {}, ()
+        return _RevisionRowResult(values={}, duplicate_revisions=(), newest_row_index=None, duplicate_row_indices=())
 
-    duplicates = _find_duplicate_revisions(per_field_rows.get(TitleBlockFieldType.REV_NUMBER), last_filled_index)
+    duplicate_revisions, duplicate_row_indices = _find_duplicate_revisions(
+        per_field_rows.get(TitleBlockFieldType.REV_NUMBER), last_filled_index
+    )
     newest_index = last_filled_index
     values = {
         field_type: rows[newest_index]
         for field_type, rows in per_field_rows.items()
         if newest_index < len(rows) and rows[newest_index]
     }
-    return values, duplicates
+    return _RevisionRowResult(
+        values=values,
+        duplicate_revisions=duplicate_revisions,
+        newest_row_index=newest_index,
+        duplicate_row_indices=duplicate_row_indices,
+    )
 
 
 def _find_duplicate_revisions(
     rev_number_rows: Optional[list[str]], last_filled_index: int
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], tuple[int, ...]]:
+    """Returns (duplicate REV values, row indices that hold ANY duplicated
+    value) - the indices are what sign_screen.py needs to draw a warning
+    box at each affected row's real on-page position, not just list which
+    REV numbers repeat."""
     if not rev_number_rows:
-        return ()
-    seen: dict[str, int] = {}
-    duplicates: list[str] = []
-    for text in rev_number_rows[: last_filled_index + 1]:
+        return (), ()
+    rows_in_range = rev_number_rows[: last_filled_index + 1]
+    indices_by_value: dict[str, list[int]] = {}
+    for i, text in enumerate(rows_in_range):
         digits = re.sub(r"[^\d]", "", text)
         if not digits:
             continue
-        seen[digits] = seen.get(digits, 0) + 1
-    for value, count in seen.items():
-        if count > 1:
-            duplicates.append(value)
-    return tuple(sorted(duplicates, key=int))
+        indices_by_value.setdefault(digits, []).append(i)
+    duplicate_values = sorted((v for v, idxs in indices_by_value.items() if len(idxs) > 1), key=int)
+    duplicate_indices = sorted(i for v in duplicate_values for i in indices_by_value[v])
+    return tuple(duplicate_values), tuple(duplicate_indices)
 
 
 def _extract_rect_text(ctx: _PageContext, raw_rect: Rect) -> str:
