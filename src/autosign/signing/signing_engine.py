@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from PIL import Image
 from pyhanko import stamp
 from pyhanko.pdf_utils import images
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
@@ -33,6 +34,24 @@ if TYPE_CHECKING:
     # while signing_engine needs PdfInfo from services just to annotate a
     # parameter type.
     from ..services.pdf_inspect_service import PdfInfo
+
+
+def _rotate_for_page(image: Image.Image, rotation: int) -> Image.Image:
+    """Counter-rotates a composed appearance image (authored upright, in
+    visual/display space) into the page's raw content space, so that the
+    viewer's own /Rotate ends up cancelling this out and the signature
+    reads upright again - see the comment in _build_stamp_style. Verified
+    empirically against a real /Rotate=270 drawing (13080708.pdf): matching
+    PIL's transpose constant directly to the page's own /Rotate value is
+    what renders upright - ROTATE_90/180/270 for page rotation 90/180/270."""
+    rotation = rotation % 360
+    if rotation == 90:
+        return image.transpose(Image.ROTATE_90)
+    if rotation == 180:
+        return image.transpose(Image.ROTATE_180)
+    if rotation == 270:
+        return image.transpose(Image.ROTATE_270)
+    return image
 
 
 class SigningError(Exception):
@@ -158,13 +177,24 @@ class SigningEngine:
         if actual_size.differs_from(box.page_size_at_design_time):
             rect = rect.scaled_to(box.page_size_at_design_time, actual_size)
 
-        pdf_box = (rect.x, rect.y, rect.x + rect.width, rect.y + rect.height)
+        # box.rect is stored in visual/display space (what the user saw and
+        # drew on in the Template Designer). A PDF annotation's /Rect, like
+        # pdfium's text-extraction rects (see title_block_service.py), is
+        # defined in the page's raw, un-rotated default user space - a
+        # viewer rotates the whole page (content + annotations) by /Rotate
+        # for display. Without this conversion, a signature box drawn on a
+        # rotated page (e.g. /Rotate 270, common for landscape drawings)
+        # gets placed at the wrong spot - often off the visible page - so
+        # the file signs with no error but the signature never shows up.
+        raw_rect = rect.to_raw_page_space(actual_size.width, actual_size.height, actual_size.rotation)
+
+        pdf_box = (raw_rect.x, raw_rect.y, raw_rect.x + raw_rect.width, raw_rect.y + raw_rect.height)
         field_spec = fields.SigFieldSpec(field_name, box=pdf_box, on_page=page_index)
 
         pdf_signer = signers.PdfSigner(
             signers.PdfSignatureMetadata(field_name=field_name),
             signer=self._cert_provider.get_signer(),
-            stamp_style=self._build_stamp_style(box, rect, sign_time),
+            stamp_style=self._build_stamp_style(box, rect, actual_size.rotation, sign_time),
             new_field_spec=field_spec,
         )
 
@@ -180,7 +210,7 @@ class SigningEngine:
         return out_buffer.getvalue()
 
     def _build_stamp_style(
-        self, box: SignatureBox, rect: Rect, sign_time: datetime
+        self, box: SignatureBox, rect: Rect, rotation: int, sign_time: datetime
     ) -> stamp.BaseStampStyle:
         text_lines = build_text_lines(box.appearance, self._signer_display_name, sign_time)
         composed = compose_appearance_image(
@@ -195,6 +225,14 @@ class SigningEngine:
             box.appearance.image_size,
             box.appearance.text_size,
         )
+        # The appearance is drawn in the page's raw, un-rotated content
+        # space (like the annotation /Rect itself - see the comment in
+        # _apply_one_field), but it was just composed upright in VISUAL
+        # space. On a rotated page the viewer then rotates this upright
+        # content along with everything else, so without counter-rotating
+        # it here first, the signature/text renders sideways (readable at
+        # 90 deg) even though the box itself lands in the right spot.
+        composed = _rotate_for_page(composed, rotation)
         return stamp.StaticStampStyle(
             background=images.PdfImage(composed), border_width=0, background_opacity=1.0
         )

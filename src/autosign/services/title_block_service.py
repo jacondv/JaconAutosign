@@ -199,24 +199,12 @@ def _design_rect_to_raw(tb_field: TitleBlockField, ctx: _PageContext) -> Rect:
 
 def _visual_rect_to_raw(rect: Rect, visual_width: float, visual_height: float, rotation: int) -> Rect:
     """Undoes the page's /Rotate so a rect drawn in visual/display space
-    (what render_page_to_qimage renders and coordinates.py maps mouse
-    clicks to/from - i.e. what every TitleBlockField.rect is stored in)
-    lands on the right spot in pdfium's raw, un-rotated text-extraction
-    space. `rotation` is the page's own /Rotate value (0/90/180/270,
-    clockwise). Derived from first principles (rotate-then-normalize) and
-    verified against a real rotation=270 drawing - see the title-block
-    check docs for the reasoning."""
-    rotation = rotation % 360
-    x, y, w, h = rect.x, rect.y, rect.width, rect.height
-    if rotation == 90:
-        raw_w = visual_height
-        return Rect(x=raw_w - y - h, y=x, width=h, height=w)
-    if rotation == 180:
-        return Rect(x=visual_width - x - w, y=visual_height - y - h, width=w, height=h)
-    if rotation == 270:
-        raw_h = visual_width
-        return Rect(x=y, y=raw_h - x - w, width=h, height=w)
-    return rect  # rotation == 0 (or an unsupported value - treat as none)
+    (what every TitleBlockField.rect is stored in) lands on the right spot
+    in pdfium's raw, un-rotated text-extraction space. See
+    Rect.to_raw_page_space (models/geometry.py) for the conversion itself -
+    shared with signing_engine.py, which needs the exact same transform for
+    where a signature annotation's /Rect actually lands."""
+    return rect.to_raw_page_space(visual_width, visual_height, rotation)
 
 
 # Circuit breaker only - not a real-world limit, just a bound on how far

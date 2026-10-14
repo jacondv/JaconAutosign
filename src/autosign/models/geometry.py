@@ -31,6 +31,31 @@ class Rect:
             height=self.height * scale_y,
         )
 
+    def to_raw_page_space(self, visual_width: float, visual_height: float, rotation: int) -> "Rect":
+        """Undoes the page's /Rotate so a rect drawn in visual/display space
+        (what render_page_to_qimage renders and ui/coordinates.py maps mouse
+        clicks to/from) lands on the right spot in the PDF's raw, un-rotated
+        default user space - the space both pdfium's get_text_bounded() and
+        a PDF annotation's /Rect are defined in. A viewer rotates the whole
+        page (content + annotations) by /Rotate for display, so any rect
+        meant to land at the on-screen position the user drew/clicked must
+        first be converted back through the inverse of that rotation.
+        `rotation` is the page's own /Rotate value (0/90/180/270, clockwise).
+        Derived from first principles (rotate-then-normalize) and verified
+        against a real rotation=270 drawing - see the title-block check
+        docs for the reasoning (first used there, now shared with signing)."""
+        rotation = rotation % 360
+        x, y, w, h = self.x, self.y, self.width, self.height
+        if rotation == 90:
+            raw_w = visual_height
+            return Rect(x=raw_w - y - h, y=x, width=h, height=w)
+        if rotation == 180:
+            return Rect(x=visual_width - x - w, y=visual_height - y - h, width=w, height=h)
+        if rotation == 270:
+            raw_h = visual_width
+            return Rect(x=y, y=raw_h - x - w, width=h, height=w)
+        return self  # rotation == 0 (or an unsupported value - treat as none)
+
 
 @dataclass(frozen=True)
 class PageSize:
