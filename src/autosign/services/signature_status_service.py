@@ -18,7 +18,14 @@ def get_signed_pages(path: Path) -> set[int]:
     rather than raising, since this is only used for a UI badge."""
     try:
         with open(path, "rb") as f:
-            reader = PdfFileReader(f)
+            # strict=False: once a file has been signed once via incremental
+            # update, its xref structure (free entries carried over from the
+            # update) makes pyHanko's strict reader raise PdfStrictReadError
+            # - caught below and silently reported as "no signed pages",
+            # which then let signing_engine try to recreate an already-
+            # filled field ("Sig1_p1 appears to be filled already"). Relax
+            # to non-strict like signing_engine.py already does when writing.
+            reader = PdfFileReader(f, strict=False)
             page_index_by_ref = _page_index_by_ref(reader)
             signed_pages: set[int] = set()
             for _name, _value, field_ref in enumerate_sig_fields(reader, filled_status=True):
